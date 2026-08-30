@@ -5,6 +5,7 @@ import json
 import streamlit as st
 from openai import OpenAI
 from PIL import Image
+from pydantic import BaseModel, Field
 
 
 st.set_page_config(page_title="AIヘアスタイル", page_icon="✂️", layout="centered")
@@ -19,6 +20,20 @@ div.stButton > button {width: 100%; border-radius: 12px; min-height: 3rem; font-
 
 st.title("✂️ AIヘアスタイル")
 st.caption("顔写真から似合いそうな髪型を提案し、完成イメージを作ります。")
+
+
+class HairStyle(BaseModel):
+    title: str
+    haircut: str
+    bangs: str
+    tone: str
+    color: str
+    reason: str
+    order: str
+
+
+class HairStyleSuggestions(BaseModel):
+    styles: list[HairStyle] = Field(min_length=3, max_length=3)
 
 
 def get_client():
@@ -45,11 +60,10 @@ def propose_styles(client, image_buffer, choices):
 あなたは実務経験のある日本の美容師です。写真と希望条件から、現実に美容室で再現できる髪型・髪色を3案提案してください。
 希望条件: {json.dumps(choices, ensure_ascii=False)}
 写真から年齢、人種、健康状態などを断定しないでください。顔立ちの優劣を評価せず、髪と顔まわりの見た目のバランス、希望条件、再現性を中心に考えてください。
-必ず次のJSONだけを返してください。Markdownは不要です。
-{{"styles":[{{"title":"案の短い名称","haircut":"長さ・形・レイヤー等","bangs":"前髪","tone":"数字トーン","color":"髪色","reason":"似合いそうな理由を60字以内","order":"美容師へそのまま見せられる具体的なオーダー文"}}]}}
-stylesは必ず3件にしてください。おまかせ項目は写真との調和を考えて具体化してください。
+異なる方向性の提案を必ず3件作ってください。おまかせ項目は写真との調和を考えて具体化してください。
+titleは短い名称、haircutは長さ・形・レイヤー等、bangsは前髪、toneは数字を含むトーン、colorは髪色、reasonは似合いそうな理由を60字以内、orderは美容師へそのまま見せられる具体的なオーダー文にしてください。
 """
-    response = client.responses.create(
+    response = client.responses.parse(
         model="gpt-5-mini",
         input=[{
             "role": "user",
@@ -58,15 +72,11 @@ stylesは必ず3件にしてください。おまかせ項目は写真との調�
                 {"type": "input_image", "image_url": f"data:image/jpeg;base64,{encoded}"},
             ],
         }],
+        text_format=HairStyleSuggestions,
     )
-    text = response.output_text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-    data = json.loads(text)
-    styles = data.get("styles", [])
-    if len(styles) != 3:
-        raise ValueError("提案数が3件ではありません。")
-    return styles
+    if response.output_parsed is None:
+        raise ValueError("提案データを取得できませんでした。")
+    return [style.model_dump() for style in response.output_parsed.styles]
 
 
 def edit_hairstyle(client, image_buffer, style):
