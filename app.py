@@ -423,7 +423,6 @@ def create_style_sheet(after_bytes, detail_bytes, style):
 
     draw.text((55, 35), style["title"], font=title_font, fill=navy)
     draw.text((60, 92), f"{style['tone']}・{style['color']}", font=subtitle_font, fill=ink)
-    draw.line((350, 108, 1210, 108), fill="#9AA6B4", width=2)
 
     front = fit_crop(Image.open(io.BytesIO(after_bytes)), 690, 670)
     side, closeup, back = split_detail_views(detail_bytes)
