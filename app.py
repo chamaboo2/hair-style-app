@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import html
 import importlib.util
 import io
 import json
@@ -25,6 +26,13 @@ RESULT_STATE_KEYS = (
     "style_sheet_pdf",
 )
 
+# 将来、利用料金やクレジット数を案内する場合は True に変更します。
+# 無料提供中は False のままにすると、料金案内は画面に表示されません。
+SHOW_USAGE_COST = False
+PROPOSAL_COST_TEXT = "使用クレジット：1"
+IMAGE_COST_TEXT = "使用クレジット：1"
+SHEET_COST_TEXT = "使用クレジット：3"
+
 
 def restart_with_same_photo():
     """Keep the current photo and return to hairstyle suggestions."""
@@ -35,6 +43,11 @@ def restart_with_same_photo():
 def restart_with_new_photo():
     """Clear the current flow and return to the first screen."""
     st.session_state.clear()
+
+
+def show_usage_cost(message):
+    if SHOW_USAGE_COST:
+        st.markdown(f'<div class="cost-note">{html.escape(message)}</div>', unsafe_allow_html=True)
 
 
 st.set_page_config(page_title="美容師さんお願いシート", page_icon="🪞", layout="centered")
@@ -145,9 +158,10 @@ st.markdown("""
 .hero h1 {
     margin: 0;
     color: #43383a;
-    font-size: clamp(1.75rem, 8vw, 2.45rem);
+    font-size: clamp(1.45rem, 6.7vw, 2.45rem);
     line-height: 1.3;
     letter-spacing: .03em;
+    white-space: nowrap;
 }
 .hero p {
     margin: .8rem auto 0;
@@ -155,6 +169,95 @@ st.markdown("""
     color: var(--muted);
     font-size: .95rem;
     line-height: 1.8;
+}
+.hero-feature {
+    margin-top: .9rem;
+    color: var(--rose-dark);
+    font-size: .86rem;
+    font-weight: 700;
+    line-height: 1.7;
+}
+.hero-pills {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: .4rem;
+    margin-top: .8rem;
+}
+.hero-pills span {
+    padding: .3rem .65rem;
+    border: 1px solid #e2cbd0;
+    border-radius: 999px;
+    background: #fffaf9;
+    color: var(--rose-dark);
+    font-size: .72rem;
+    font-weight: 700;
+}
+.privacy-note,
+.cost-note {
+    margin: .65rem 0 1rem;
+    padding: .8rem .9rem;
+    border: 1px solid #e3d2d5;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .78);
+    color: #5f5255;
+    font-size: .84rem;
+    line-height: 1.65;
+}
+.cost-note {
+    margin-bottom: .55rem;
+    border-color: #d8b7be;
+    background: var(--rose-pale);
+    color: var(--rose-dark);
+    font-weight: 700;
+    text-align: center;
+}
+.style-card {
+    margin: .75rem 0;
+    padding: 1rem;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .86);
+    box-shadow: 0 5px 16px rgba(93, 62, 68, .05);
+}
+.style-card.selected {
+    border: 2px solid var(--rose);
+    background: #fbf1f3;
+    box-shadow: 0 7px 20px rgba(135, 81, 92, .11);
+}
+.style-card-title {
+    margin-bottom: .8rem;
+    color: #493b3e;
+    font-size: 1.05rem;
+    font-weight: 800;
+}
+.style-card-grid {
+    display: grid;
+    grid-template-columns: 4.3rem 1fr;
+    gap: .48rem .7rem;
+    align-items: start;
+    font-size: .91rem;
+    line-height: 1.55;
+}
+.style-card-label {
+    color: var(--rose-dark);
+    font-weight: 700;
+}
+.style-card-value {color: var(--ink);}
+.style-reason {
+    margin-top: .85rem;
+    padding: .78rem .85rem;
+    border-left: 4px solid var(--rose);
+    border-radius: 10px;
+    background: #f7e9ec;
+    color: var(--ink);
+    font-size: .88rem;
+    line-height: 1.65;
+}
+.style-reason strong {
+    display: block;
+    margin-bottom: .2rem;
+    color: var(--rose-dark);
 }
 h2 {
     color: #4b3e41 !important;
@@ -230,6 +333,8 @@ hr {border-color: var(--line) !important;}
     .block-container {padding-left: 1rem; padding-right: 1rem;}
     .hero {padding: 1.55rem 1rem 1.3rem; border-radius: 20px;}
     .hero-illustration {width: 92px; height: 132px;}
+    .hero h1 {font-size: clamp(1.35rem, 6.5vw, 1.75rem); letter-spacing: 0;}
+    .style-card {padding: .9rem;}
 }
 </style>
 """, unsafe_allow_html=True)
@@ -249,7 +354,9 @@ st.markdown(f"""
   {hero_image_html}
   <p class="hero-kicker">HAIR STYLE CONSULTATION</p>
   <h1>美容師さんお願いシート</h1>
-  <p>似合いそうな髪型を試して、伝えたいイメージを<br>美容師さんに見せられる一枚に。</p>
+  <p>似合いそうな髪型を試すだけでなく、完成イメージとオーダー内容を、美容師さんにそのまま見せられる一枚にまとめます。</p>
+  <div class="hero-feature">髪型選びから、美容院で見せるお願いシートまで</div>
+  <div class="hero-pills"><span>似合う髪型を3案</span><span>完成イメージ</span><span>PNG・PDF保存</span></div>
 </section>
 """, unsafe_allow_html=True)
 
@@ -524,6 +631,12 @@ if camera_photo is None:
         )
 uploaded = camera_photo or selected_photo
 st.caption("顔と髪全体が入るように、明るい場所で撮影してください。写真は本アプリには保存されません。")
+st.markdown(
+    '<div class="privacy-note"><strong>写真の取り扱い</strong><br>'
+    '写真は髪型の提案と完成イメージの生成にだけ使用し、OpenAI APIへ一時的に送信します。'
+    '本アプリやSupabaseには保存しません。</div>',
+    unsafe_allow_html=True,
+)
 
 if uploaded:
     try:
@@ -567,6 +680,7 @@ if uploaded:
     }
     st.caption("ボタンを押すと、写真が提案のためOpenAI APIへ送信されます。")
 
+    show_usage_cost(PROPOSAL_COST_TEXT)
     if st.button("おすすめを3案見る", type="primary"):
         with st.spinner("似合いそうなスタイルを考えています…"):
             try:
@@ -580,21 +694,36 @@ if uploaded:
 
     if "styles" in st.session_state:
         st.subheader("3. 気になる案を選ぶ")
-        labels = []
-        for index, style in enumerate(st.session_state.styles, 1):
-            label = f"案{index}｜{style['title']}"
-            labels.append(label)
-            with st.container(border=True):
-                st.markdown(f"**{label}**")
-                st.write(f"髪型：{style['haircut']}")
-                st.write(f"前髪：{style['bangs']}")
-                st.write(f"カラー：{style['tone']}・{style['color']}")
-                st.caption(style["reason"])
-
+        st.caption("カードをタップして、試してみたい案を選んでください。")
+        labels = [
+            f"案{index}｜{style['title']}"
+            for index, style in enumerate(st.session_state.styles, 1)
+        ]
         selected_label = st.radio("生成する案", labels, label_visibility="collapsed")
         selected_index = labels.index(selected_label)
         selected_style = st.session_state.styles[selected_index]
 
+        for index, style in enumerate(st.session_state.styles, 1):
+            card_class = "style-card selected" if index - 1 == selected_index else "style-card"
+            title = html.escape(f"案{index}｜{style['title']}")
+            haircut = html.escape(style["haircut"])
+            bangs_text = html.escape(style["bangs"])
+            color_text = html.escape(f"{style['tone']}・{style['color']}")
+            reason = html.escape(style["reason"])
+            st.markdown(
+                f'''<article class="{card_class}">
+                    <div class="style-card-title">{title}</div>
+                    <div class="style-card-grid">
+                        <div class="style-card-label">髪型</div><div class="style-card-value">{haircut}</div>
+                        <div class="style-card-label">前髪</div><div class="style-card-value">{bangs_text}</div>
+                        <div class="style-card-label">カラー</div><div class="style-card-value">{color_text}</div>
+                    </div>
+                    <div class="style-reason"><strong>この案がおすすめな理由</strong>{reason}</div>
+                </article>''',
+                unsafe_allow_html=True,
+            )
+
+        show_usage_cost(IMAGE_COST_TEXT)
         if st.button("この髪型にしてみる", type="primary"):
             with st.spinner("完成イメージを生成しています。しばらくお待ちください…"):
                 try:
@@ -619,7 +748,8 @@ if uploaded:
         st.text_area("このまま美容師さんに見せられます", st.session_state.selected_style["order"], height=160)
 
         st.subheader("6. お願いシートを作る")
-        st.caption("正面・耳かけ・耳まわり・後ろ姿とオーダー内容を1枚にまとめます。追加の画像生成料金がかかります。")
+        st.caption("正面・耳かけ・耳まわり・後ろ姿とオーダー内容を1枚にまとめます。追加の画像生成処理を行います。")
+        show_usage_cost(SHEET_COST_TEXT)
         if st.button("美容師さんお願いシートを作る", type="primary"):
             with st.spinner("横・耳まわり・後ろ姿を生成し、スタイルシートを作っています…"):
                 try:
