@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import importlib.util
 import io
 import json
@@ -415,15 +416,37 @@ def image_to_pdf_bytes(image):
     return output.getvalue()
 
 
-uploaded = st.file_uploader("1. 顔写真を1枚アップロード", type=["jpg", "jpeg", "png"])
-st.caption("正面に近く、顔と髪全体が明るく写った写真がおすすめです。写真はアプリ内に保存しません。")
+st.subheader("1. 顔写真を用意")
+photo_method = st.radio(
+    "写真の用意方法",
+    ["カメラで撮る", "端末の写真を選ぶ"],
+    horizontal=True,
+    label_visibility="collapsed",
+)
+
+if photo_method == "カメラで撮る":
+    uploaded = st.camera_input("カメラで顔写真を撮る")
+    st.caption("カメラを正面に向け、顔と髪全体が入るように撮影してください。撮り直しもできます。")
+else:
+    uploaded = st.file_uploader("端末から顔写真を1枚選ぶ", type=["jpg", "jpeg", "png"])
+    st.caption("JPG・JPEG・PNGに対応しています。")
+
+st.caption("明るい場所で撮影した写真がおすすめです。写真はアプリ内に保存しません。")
 
 if uploaded:
     try:
+        current_photo_hash = hashlib.sha256(uploaded.getvalue()).hexdigest()
+        if st.session_state.get("photo_hash") != current_photo_hash:
+            st.session_state.photo_hash = current_photo_hash
+            for state_key in (
+                "styles", "after_image", "selected_style",
+                "style_sheet_png", "style_sheet_pdf"
+            ):
+                st.session_state.pop(state_key, None)
         original_image, image_buffer = normalized_image_bytes(uploaded)
-        st.image(original_image, caption="アップロードした写真", use_container_width=True)
+        st.image(original_image, caption="使用する写真", use_container_width=True)
     except Exception:
-        st.error("写真を読み込めませんでした。別のJPG・JPEG・PNG画像をお試しください。")
+        st.error("写真を読み込めませんでした。撮り直すか、別の写真を選んでください。")
         st.stop()
 
     st.subheader("2. 希望を選択")
@@ -516,7 +539,7 @@ if uploaded:
                     use_container_width=True
                 )
 else:
-    st.info("最初に顔写真をアップロードしてください。")
+    st.info("最初にカメラで顔写真を撮影してください。")
 
 st.divider()
 st.caption("生成画像は参考イメージです。髪質や現在の髪の状態により、実際の仕上がりとは異なる場合があります。")
