@@ -1,4 +1,5 @@
 import base64
+import importlib.util
 import io
 import json
 from pathlib import Path
@@ -247,9 +248,10 @@ Requested style: {style['haircut']}; bangs: {style['bangs']}; color: {style['ton
 
 
 def japanese_font_path():
-    import japanize_matplotlib
-
-    font_dir = Path(japanize_matplotlib.__file__).resolve().parent / "fonts"
+    spec = importlib.util.find_spec("japanize_matplotlib")
+    if spec is None or spec.origin is None:
+        raise FileNotFoundError("日本語フォント用パッケージが見つかりません。")
+    font_dir = Path(spec.origin).resolve().parent / "fonts"
     candidates = list(font_dir.glob("*.ttf"))
     if not candidates:
         raise FileNotFoundError("日本語フォントが見つかりません。")
@@ -465,9 +467,9 @@ if uploaded:
         st.subheader("5. 美容師さん向けオーダー文")
         st.text_area("このまま美容師さんに見せられます", st.session_state.selected_style["order"], height=160)
 
-        st.subheader("6. 美容師向けスタイルシート")
+        st.subheader("6. お願いシートを作る")
         st.caption("正面・耳かけ・耳まわり・後ろ姿とオーダー内容を1枚にまとめます。追加の画像生成料金がかかります。")
-        if st.button("美容師向けスタイルシートを作る", type="primary"):
+        if st.button("美容師さんお願いシートを作る", type="primary"):
             with st.spinner("横・耳まわり・後ろ姿を生成し、スタイルシートを作っています…"):
                 try:
                     detail_bytes = generate_detail_views(
