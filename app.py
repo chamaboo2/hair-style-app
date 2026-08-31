@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 RESULT_STATE_KEYS = (
     "styles",
+    "selected_style_index",
     "after_image",
     "selected_style",
     "style_sheet_png",
@@ -48,6 +49,12 @@ def restart_with_new_photo():
 def show_usage_cost(message):
     if SHOW_USAGE_COST:
         st.markdown(f'<div class="cost-note">{html.escape(message)}</div>', unsafe_allow_html=True)
+
+
+def select_suggestion(index):
+    st.session_state.selected_style_index = index
+    for state_key in ("after_image", "selected_style", "style_sheet_png", "style_sheet_pdf"):
+        st.session_state.pop(state_key, None)
 
 
 st.set_page_config(page_title="美容師さんお願いシート", page_icon="🪞", layout="centered")
@@ -119,6 +126,33 @@ st.markdown("""
     color: #9b8d90 !important;
     -webkit-text-fill-color: #9b8d90 !important;
     opacity: 1;
+}
+/* プルダウンをOS・ブラウザの配色に左右されず読みやすくする */
+[data-baseweb="select"] > div {
+    background: #ffffff !important;
+    color: var(--ink) !important;
+}
+[data-baseweb="popover"],
+[data-baseweb="popover"] ul[role="listbox"] {
+    background: #ffffff !important;
+}
+[data-baseweb="popover"] li[role="option"] {
+    background: #ffffff !important;
+    color: var(--ink) !important;
+    -webkit-text-fill-color: var(--ink) !important;
+}
+[data-baseweb="popover"] li[role="option"] * {
+    color: var(--ink) !important;
+    -webkit-text-fill-color: var(--ink) !important;
+}
+[data-baseweb="popover"] li[role="option"][aria-selected="true"] {
+    background: var(--rose-dark) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+[data-baseweb="popover"] li[role="option"][aria-selected="true"] * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
 }
 .block-container {
     max-width: 720px;
@@ -225,6 +259,16 @@ st.markdown("""
     background: #fbf1f3;
     box-shadow: 0 7px 20px rgba(135, 81, 92, .11);
 }
+.selected-badge {
+    display: inline-block;
+    margin-bottom: .55rem;
+    padding: .2rem .55rem;
+    border-radius: 999px;
+    background: var(--rose);
+    color: #ffffff;
+    font-size: .72rem;
+    font-weight: 800;
+}
 .style-card-title {
     margin-bottom: .8rem;
     color: #493b3e;
@@ -258,6 +302,41 @@ st.markdown("""
     display: block;
     margin-bottom: .2rem;
     color: var(--rose-dark);
+}
+.selected-summary {
+    margin: .6rem 0;
+    padding: .75rem .85rem;
+    border: 1px solid #d8b7be;
+    border-radius: 13px;
+    background: var(--rose-pale);
+    color: var(--rose-dark);
+    font-size: .9rem;
+    font-weight: 800;
+    text-align: center;
+}
+.before-after {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: .65rem;
+    width: 100%;
+    max-width: 560px;
+    margin: .5rem auto 1rem;
+}
+.before-after figure {margin: 0; min-width: 0;}
+.before-after img {
+    display: block;
+    width: 100%;
+    max-height: 360px;
+    object-fit: contain;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #ffffff;
+}
+.before-after figcaption {
+    margin-top: .35rem;
+    color: var(--muted);
+    font-size: .8rem;
+    text-align: center;
 }
 h2 {
     color: #4b3e41 !important;
@@ -652,6 +731,21 @@ if uploaded:
         st.stop()
 
     st.subheader("2. おすすめを見る")
+    style_category = st.selectbox(
+        "希望するスタイル",
+        ["レディース", "メンズ"],
+        help="選んだスタイルに合わせて、雰囲気・長さ・前髪の候補が変わります。",
+        on_change=restart_with_same_photo,
+    )
+    if style_category == "レディース":
+        mood_options = ["おまかせ", "かわいい", "きれい", "上品", "かっこいい", "ナチュラル"]
+        length_options = ["おまかせ", "ショート", "ボブ", "ミディアム", "ロング"]
+        bangs_options = ["おまかせ", "あり", "なし"]
+    else:
+        mood_options = ["おまかせ", "清潔感", "爽やか", "かっこいい", "大人っぽい", "ナチュラル"]
+        length_options = ["おまかせ", "ベリーショート", "ショート", "ミディアム", "ロング"]
+        bangs_options = ["おまかせ", "下ろす", "上げる", "なし"]
+
     mood = "おまかせ"
     length = "おまかせ"
     bangs = "おまかせ"
@@ -659,9 +753,9 @@ if uploaded:
     custom_color = ""
     tone = "おまかせ"
     with st.expander("希望があれば指定する（任意）"):
-        mood = st.selectbox("なりたい雰囲気", ["おまかせ", "かわいい", "きれい", "かっこいい", "ナチュラル"])
-        length = st.selectbox("髪の長さ", ["おまかせ", "ショート", "ボブ", "ミディアム", "ロング"])
-        bangs = st.selectbox("前髪", ["おまかせ", "あり", "なし"])
+        mood = st.selectbox("なりたい雰囲気", mood_options, key=f"mood_{style_category}")
+        length = st.selectbox("髪の長さ", length_options, key=f"length_{style_category}")
+        bangs = st.selectbox("前髪", bangs_options, key=f"bangs_{style_category}")
         color = st.selectbox("髪色", ["おまかせ", "黒", "ブラウン", "ベージュ", "ピンク", "ブルー", "その他"])
         if color == "その他":
             custom_color = st.text_input("希望する髪色", placeholder="例：ブルーグレージュ")
@@ -672,6 +766,7 @@ if uploaded:
             )
 
     choices = {
+        "スタイル区分": style_category,
         "雰囲気": mood,
         "長さ": length,
         "前髪": bangs,
@@ -685,6 +780,7 @@ if uploaded:
         with st.spinner("似合いそうなスタイルを考えています…"):
             try:
                 st.session_state.styles = propose_styles(get_client(), image_buffer, choices)
+                st.session_state.selected_style_index = 0
                 st.session_state.pop("after_image", None)
                 st.session_state.pop("style_sheet_png", None)
                 st.session_state.pop("style_sheet_pdf", None)
@@ -694,17 +790,16 @@ if uploaded:
 
     if "styles" in st.session_state:
         st.subheader("3. 気になる案を選ぶ")
-        st.caption("カードをタップして、試してみたい案を選んでください。")
-        labels = [
-            f"案{index}｜{style['title']}"
-            for index, style in enumerate(st.session_state.styles, 1)
-        ]
-        selected_label = st.radio("生成する案", labels, label_visibility="collapsed")
-        selected_index = labels.index(selected_label)
+        st.caption("各カードの「この案を選ぶ」をタップしてください。案1〜3のどれでも選べます。")
+        selected_index = st.session_state.get("selected_style_index", 0)
+        if selected_index not in range(len(st.session_state.styles)):
+            selected_index = 0
+            st.session_state.selected_style_index = 0
         selected_style = st.session_state.styles[selected_index]
 
         for index, style in enumerate(st.session_state.styles, 1):
             card_class = "style-card selected" if index - 1 == selected_index else "style-card"
+            selected_badge = '<div class="selected-badge">✓ 現在選択中</div>' if index - 1 == selected_index else ""
             title = html.escape(f"案{index}｜{style['title']}")
             haircut = html.escape(style["haircut"])
             bangs_text = html.escape(style["bangs"])
@@ -712,6 +807,7 @@ if uploaded:
             reason = html.escape(style["reason"])
             st.markdown(
                 f'''<article class="{card_class}">
+                    {selected_badge}
                     <div class="style-card-title">{title}</div>
                     <div class="style-card-grid">
                         <div class="style-card-label">髪型</div><div class="style-card-value">{haircut}</div>
@@ -723,8 +819,29 @@ if uploaded:
                 unsafe_allow_html=True,
             )
 
+            if index - 1 == selected_index:
+                st.button(
+                    f"✓ 案{index}を選択中",
+                    key=f"select_style_{index}",
+                    disabled=True,
+                    use_container_width=True,
+                )
+            else:
+                st.button(
+                    f"案{index}を選ぶ",
+                    key=f"select_style_{index}",
+                    on_click=select_suggestion,
+                    args=(index - 1,),
+                    use_container_width=True,
+                )
+
+        selected_title = html.escape(f"案{selected_index + 1}｜{selected_style['title']}")
+        st.markdown(
+            f'<div class="selected-summary">現在選択中：{selected_title}<br>下のボタンでこの案を写真に反映します</div>',
+            unsafe_allow_html=True,
+        )
         show_usage_cost(IMAGE_COST_TEXT)
-        if st.button("この髪型にしてみる", type="primary"):
+        if st.button(f"選択中の案{selected_index + 1}をこの写真で試す", type="primary"):
             with st.spinner("完成イメージを生成しています。しばらくお待ちください…"):
                 try:
                     st.session_state.after_image = edit_hairstyle(get_client(), image_buffer, selected_style)
@@ -737,11 +854,15 @@ if uploaded:
 
     if "after_image" in st.session_state:
         st.subheader("4. Before / After")
-        left, right = st.columns(2)
-        with left:
-            st.image(original_image, caption="Before", use_container_width=True)
-        with right:
-            st.image(st.session_state.after_image, caption="After", use_container_width=True)
+        before_base64 = base64.b64encode(image_buffer.getvalue()).decode("ascii")
+        after_base64 = base64.b64encode(st.session_state.after_image).decode("ascii")
+        st.markdown(
+            f'''<div class="before-after">
+                <figure><img src="data:image/jpeg;base64,{before_base64}" alt="元写真"><figcaption>Before</figcaption></figure>
+                <figure><img src="data:image/jpeg;base64,{after_base64}" alt="生成後の写真"><figcaption>After</figcaption></figure>
+            </div>''',
+            unsafe_allow_html=True,
+        )
         st.download_button("完成画像を保存", st.session_state.after_image, "hair-style-after.jpg", "image/jpeg", use_container_width=True)
 
         st.subheader("5. 美容師さん向けオーダー文")
