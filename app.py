@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import logging
 from pathlib import Path
 
 import streamlit as st
@@ -11,6 +12,9 @@ from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, Field
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas as pdf_canvas
+
+
+logger = logging.getLogger(__name__)
 
 
 st.set_page_config(page_title="美容師さんお願いシート", page_icon="🪞", layout="centered")
@@ -489,21 +493,17 @@ def image_to_pdf_bytes(image):
 
 
 st.subheader("1. 顔写真を用意")
-photo_method = st.radio(
-    "写真の用意方法",
-    ["カメラで撮る", "端末の写真を選ぶ"],
-    horizontal=True,
-    label_visibility="collapsed",
-)
-
-if photo_method == "カメラで撮る":
-    uploaded = st.camera_input("カメラで顔写真を撮る")
-    st.caption("カメラを正面に向け、顔と髪全体が入るように撮影してください。撮り直しもできます。")
-else:
-    uploaded = st.file_uploader("端末から顔写真を1枚選ぶ", type=["jpg", "jpeg", "png"])
-    st.caption("JPG・JPEG・PNGに対応しています。")
-
-st.caption("明るい場所で撮影した写真がおすすめです。写真はアプリ内に保存しません。")
+camera_photo = st.camera_input("顔写真を撮る")
+selected_photo = None
+if camera_photo is None:
+    with st.expander("端末にある写真を使う"):
+        selected_photo = st.file_uploader(
+            "写真を1枚選ぶ",
+            type=["jpg", "jpeg", "png"],
+            label_visibility="collapsed",
+        )
+uploaded = camera_photo or selected_photo
+st.caption("顔と髪全体が入るように、明るい場所で撮影してください。写真は本アプリには保存されません。")
 
 if uploaded:
     try:
@@ -521,18 +521,36 @@ if uploaded:
         st.error("写真を読み込めませんでした。撮り直すか、別の写真を選んでください。")
         st.stop()
 
-    st.subheader("2. 希望を選択")
-    mood = st.selectbox("なりたい雰囲気", ["おまかせ", "かわいい", "きれい", "かっこいい", "ナチュラル"])
-    length = st.selectbox("髪の長さ", ["おまかせ", "ショート", "ボブ", "ミディアム", "ロング"])
-    bangs = st.selectbox("前髪", ["おまかせ", "あり", "なし"])
-    color = st.selectbox("髪色", ["おまかせ", "黒", "ブラウン", "ベージュ", "ピンク", "ブルー", "その他"])
-    custom_color = st.text_input("希望する髪色を入力", placeholder="例：ブルーグレージュ") if color == "その他" else ""
-    tone = st.slider("明るさ", 1, 15, 8, help="1が暗く、15が明るい目安です。")
+    st.subheader("2. おすすめを見る")
+    mood = "おまかせ"
+    length = "おまかせ"
+    bangs = "おまかせ"
+    color = "おまかせ"
+    custom_color = ""
+    tone = "おまかせ"
+    with st.expander("希望があれば指定する（任意）"):
+        mood = st.selectbox("なりたい雰囲気", ["おまかせ", "かわいい", "きれい", "かっこいい", "ナチュラル"])
+        length = st.selectbox("髪の長さ", ["おまかせ", "ショート", "ボブ", "ミディアム", "ロング"])
+        bangs = st.selectbox("前髪", ["おまかせ", "あり", "なし"])
+        color = st.selectbox("髪色", ["おまかせ", "黒", "ブラウン", "ベージュ", "ピンク", "ブルー", "その他"])
+        if color == "その他":
+            custom_color = st.text_input("希望する髪色", placeholder="例：ブルーグレージュ")
+        if color != "おまかせ":
+            tone = st.selectbox(
+                "明るさ",
+                ["おまかせ"] + [f"{number}トーン" for number in range(1, 16)],
+            )
 
-    choices = {"雰囲気": mood, "長さ": length, "前髪": bangs, "髪色": custom_color or color, "明るさ": f"{tone}トーン"}
-    consent = st.checkbox("写真が提案・画像生成のためOpenAI APIへ送信されることに同意します")
+    choices = {
+        "雰囲気": mood,
+        "長さ": length,
+        "前髪": bangs,
+        "髪色": custom_color or color,
+        "明るさ": tone,
+    }
+    st.caption("ボタンを押すと、写真が提案のためOpenAI APIへ送信されます。")
 
-    if st.button("おすすめを3案つくる", type="primary", disabled=not consent):
+    if st.button("おすすめを3案見る", type="primary"):
         with st.spinner("似合いそうなスタイルを考えています…"):
             try:
                 st.session_state.styles = propose_styles(get_client(), image_buffer, choices)
@@ -540,10 +558,11 @@ if uploaded:
                 st.session_state.pop("style_sheet_png", None)
                 st.session_state.pop("style_sheet_pdf", None)
             except Exception as exc:
-                st.error(f"提案を作成できませんでした。もう一度お試しください。\n\n詳細: {exc}")
+                logger.exception("Failed to propose hairstyles")
+                st.error("提案を作成できませんでした。少し待ってから、もう一度お試しください。")
 
     if "styles" in st.session_state:
-        st.subheader("3. 気になる案を選択")
+        st.subheader("3. 気になる案を選ぶ")
         labels = []
         for index, style in enumerate(st.session_state.styles, 1):
             label = f"案{index}｜{style['title']}"
@@ -567,7 +586,8 @@ if uploaded:
                     st.session_state.pop("style_sheet_png", None)
                     st.session_state.pop("style_sheet_pdf", None)
                 except Exception as exc:
-                    st.error(f"画像を生成できませんでした。もう一度お試しください。\n\n詳細: {exc}")
+                    logger.exception("Failed to generate hairstyle image")
+                    st.error("画像を生成できませんでした。少し待ってから、もう一度お試しください。")
 
     if "after_image" in st.session_state:
         st.subheader("4. Before / After")
@@ -595,7 +615,8 @@ if uploaded:
                     st.session_state.style_sheet_png = image_to_png_bytes(style_sheet)
                     st.session_state.style_sheet_pdf = image_to_pdf_bytes(style_sheet)
                 except Exception as exc:
-                    st.error(f"スタイルシートを作成できませんでした。もう一度お試しください。\n\n詳細: {exc}")
+                    logger.exception("Failed to create stylist request sheet")
+                    st.error("お願いシートを作成できませんでした。少し待ってから、もう一度お試しください。")
 
         if "style_sheet_png" in st.session_state:
             st.image(st.session_state.style_sheet_png, caption="美容師向けスタイルシート", use_container_width=True)
