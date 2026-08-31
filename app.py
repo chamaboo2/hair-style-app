@@ -32,6 +32,57 @@ st.markdown("""
         linear-gradient(180deg, #fffdfb 0%, var(--ivory) 100%);
     color: var(--ink);
 }
+.stApp p,
+.stApp li,
+.stApp label,
+.stApp [data-testid="stMarkdownContainer"],
+.stApp [data-testid="stWidgetLabel"],
+.stApp [data-testid="stRadio"] label,
+.stApp [data-testid="stCheckbox"] label,
+.stApp [data-testid="stFileUploader"] small,
+.stApp [data-testid="stAlert"] {
+    color: var(--ink) !important;
+}
+.stApp div[role="radiogroup"] {
+    gap: .55rem;
+}
+.stApp div[role="radiogroup"] > label {
+    padding: .68rem .85rem !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 13px !important;
+    background: rgba(255, 255, 255, .94) !important;
+}
+.stApp div[role="radiogroup"] > label:has(input:checked) {
+    border-color: var(--rose) !important;
+    background: var(--rose-pale) !important;
+    box-shadow: 0 3px 10px rgba(135, 81, 92, .08);
+}
+.stApp div[role="radiogroup"] > label p,
+.stApp div[role="radiogroup"] > label span,
+.stApp [data-testid="stRadio"] label p,
+.stApp [data-testid="stRadio"] label span {
+    color: var(--ink) !important;
+    -webkit-text-fill-color: var(--ink) !important;
+    opacity: 1 !important;
+}
+.stApp [data-testid="stCaptionContainer"],
+.stApp [data-testid="stCaptionContainer"] p,
+.stApp .stCaption {
+    color: var(--muted) !important;
+}
+.stApp input,
+.stApp textarea,
+.stApp [data-baseweb="select"] span,
+.stApp [data-baseweb="select"] div {
+    color: var(--ink) !important;
+    -webkit-text-fill-color: var(--ink) !important;
+}
+.stApp input::placeholder,
+.stApp textarea::placeholder {
+    color: #9b8d90 !important;
+    -webkit-text-fill-color: #9b8d90 !important;
+    opacity: 1;
+}
 .block-container {
     max-width: 720px;
     padding-top: 1.1rem;
@@ -99,6 +150,11 @@ div.stButton > button {
     font-weight: 700;
     box-shadow: 0 7px 18px rgba(135, 81, 92, .18);
 }
+div.stButton > button p,
+div.stButton > button span {
+    color: white !important;
+    -webkit-text-fill-color: white !important;
+}
 div.stButton > button:hover {
     background: var(--rose-dark) !important;
     border-color: var(--rose-dark) !important;
@@ -107,6 +163,22 @@ div.stDownloadButton > button {
     border-color: var(--rose) !important;
     border-radius: 999px;
     color: var(--rose-dark) !important;
+}
+div.stDownloadButton > button p,
+div.stDownloadButton > button span {
+    color: var(--rose-dark) !important;
+    -webkit-text-fill-color: var(--rose-dark) !important;
+}
+[data-testid="stFileUploader"] button,
+[data-testid="stCameraInput"] button {
+    border-color: var(--rose) !important;
+    color: var(--rose-dark) !important;
+    background: white !important;
+}
+[data-testid="stFileUploader"] button *,
+[data-testid="stCameraInput"] button * {
+    color: var(--rose-dark) !important;
+    -webkit-text-fill-color: var(--rose-dark) !important;
 }
 [data-testid="stFileUploader"] {
     border: 1px dashed #d7b8be;
