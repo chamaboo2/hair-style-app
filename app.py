@@ -17,6 +17,26 @@ from reportlab.pdfgen import canvas as pdf_canvas
 logger = logging.getLogger(__name__)
 
 
+RESULT_STATE_KEYS = (
+    "styles",
+    "after_image",
+    "selected_style",
+    "style_sheet_png",
+    "style_sheet_pdf",
+)
+
+
+def restart_with_same_photo():
+    """Keep the current photo and return to hairstyle suggestions."""
+    for state_key in RESULT_STATE_KEYS:
+        st.session_state.pop(state_key, None)
+
+
+def restart_with_new_photo():
+    """Clear the current flow and return to the first screen."""
+    st.session_state.clear()
+
+
 st.set_page_config(page_title="美容師さんお願いシート", page_icon="🪞", layout="centered")
 
 st.markdown("""
@@ -492,7 +512,7 @@ def image_to_pdf_bytes(image):
 
 
 st.subheader("1. 顔写真を用意")
-camera_photo = st.camera_input("顔写真を撮る")
+camera_photo = st.camera_input("顔写真を撮る", key="camera_photo")
 selected_photo = None
 if camera_photo is None:
     with st.expander("端末にある写真を使う"):
@@ -500,6 +520,7 @@ if camera_photo is None:
             "写真を1枚選ぶ",
             type=["jpg", "jpeg", "png"],
             label_visibility="collapsed",
+            key="selected_photo",
         )
 uploaded = camera_photo or selected_photo
 st.caption("顔と髪全体が入るように、明るい場所で撮影してください。写真は本アプリには保存されません。")
@@ -509,10 +530,7 @@ if uploaded:
         current_photo_hash = hashlib.sha256(uploaded.getvalue()).hexdigest()
         if st.session_state.get("photo_hash") != current_photo_hash:
             st.session_state.photo_hash = current_photo_hash
-            for state_key in (
-                "styles", "after_image", "selected_style",
-                "style_sheet_png", "style_sheet_pdf"
-            ):
+            for state_key in RESULT_STATE_KEYS:
                 st.session_state.pop(state_key, None)
         original_image, image_buffer = normalized_image_bytes(uploaded)
         st.image(original_image, caption="使用する写真", use_container_width=True)
@@ -630,6 +648,22 @@ if uploaded:
                     "PDFで保存", st.session_state.style_sheet_pdf, "hair-style-sheet.pdf", "application/pdf",
                     use_container_width=True
                 )
+
+        st.subheader("7. もう一度作る")
+        retry_left, retry_right = st.columns(2)
+        with retry_left:
+            st.button(
+                "同じ写真で別の案を見る",
+                on_click=restart_with_same_photo,
+                use_container_width=True,
+            )
+        with retry_right:
+            st.button(
+                "新しい写真で最初から",
+                on_click=restart_with_new_photo,
+                use_container_width=True,
+            )
+        st.caption("「新しい写真で最初から」を押すと、トップ画面に戻り、撮影からやり直せます。")
 else:
     st.info("最初にカメラで顔写真を撮影してください。")
 
