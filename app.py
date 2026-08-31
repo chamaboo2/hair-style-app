@@ -51,6 +51,14 @@ st.markdown("""
     margin: 0 auto 1rem;
     background: var(--rose);
 }
+.hero-illustration {
+    display: block;
+    width: 108px;
+    height: 150px;
+    margin: -0.35rem auto .75rem;
+    object-fit: contain;
+    filter: drop-shadow(0 8px 12px rgba(93, 62, 68, .12));
+}
 .hero-kicker {
     margin: 0 0 .55rem;
     color: var(--rose);
@@ -124,13 +132,24 @@ hr {border-color: var(--line) !important;}
 @media (max-width: 640px) {
     .block-container {padding-left: 1rem; padding-right: 1rem;}
     .hero {padding: 1.55rem 1rem 1.3rem; border-radius: 20px;}
+    .hero-illustration {width: 92px; height: 132px;}
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("""
+hero_image_path = Path(__file__).resolve().parent / "job_biyoushi_original.png"
+hero_image_html = ""
+if hero_image_path.exists():
+    hero_image_base64 = base64.b64encode(hero_image_path.read_bytes()).decode("ascii")
+    hero_image_html = (
+        f'<img class="hero-illustration" '
+        f'src="data:image/png;base64,{hero_image_base64}" alt="美容師さんのイラスト">'
+    )
+
+st.markdown(f"""
 <section class="hero">
   <div class="hero-mark"></div>
+  {hero_image_html}
   <p class="hero-kicker">HAIR STYLE CONSULTATION</p>
   <h1>美容師さんお願いシート</h1>
   <p>似合いそうな髪型を試して、伝えたいイメージを<br>美容師さんに見せられる一枚に。</p>
