@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 from openai import OpenAI
 from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, Field
@@ -57,6 +58,35 @@ def select_suggestion(index):
         st.session_state.pop(state_key, None)
 
 
+def render_step(step, title):
+    progress = round(step / 7 * 100)
+    st.markdown(
+        f'<div class="step-header"><div class="step-meta">STEP {step} / 7</div>'
+        f'<div class="step-progress"><span style="width:{progress}%"></span></div>'
+        f'<h2>{html.escape(title)}</h2></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_copy_button(order_text):
+    safe_text = json.dumps(order_text, ensure_ascii=False)
+    components.html(
+        f'''<!doctype html><html><head><meta charset="utf-8"><style>
+        body{{margin:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
+        button{{width:100%;height:46px;border:1px solid #87515c;border-radius:999px;background:#43383a;color:#fff;font-size:15px;font-weight:700;cursor:pointer}}
+        button:active{{transform:scale(.99)}}
+        </style></head><body><button id="copy">オーダー文をコピー</button><script>
+        const text={safe_text}; const button=document.getElementById('copy');
+        button.addEventListener('click', async () => {{
+          try {{ await navigator.clipboard.writeText(text); }}
+          catch (e) {{ const area=document.createElement('textarea'); area.value=text; document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove(); }}
+          button.textContent='コピーしました ✓'; setTimeout(() => button.textContent='オーダー文をコピー', 1800);
+        }});
+        </script></body></html>''',
+        height=52,
+    )
+
+
 st.set_page_config(page_title="美容師さんお願いシート", page_icon="🪞", layout="centered")
 
 st.markdown("""
@@ -67,8 +97,10 @@ st.markdown("""
     --rose-pale: #f5e9eb;
     --ivory: #fdfaf7;
     --ink: #3d3436;
-    --muted: #7a6d70;
+    --muted: #62575a;
     --line: #e8dadd;
+    --radius: 16px;
+    --button-height: 3rem;
 }
 .stApp {
     background:
@@ -326,8 +358,8 @@ st.markdown("""
 .before-after img {
     display: block;
     width: 100%;
-    max-height: 360px;
-    object-fit: contain;
+    aspect-ratio: 3 / 4;
+    object-fit: cover;
     border: 1px solid var(--line);
     border-radius: 14px;
     background: #ffffff;
@@ -338,42 +370,100 @@ st.markdown("""
     font-size: .8rem;
     text-align: center;
 }
+.step-header {
+    margin: 2rem 0 .85rem;
+}
+.step-meta {
+    margin-bottom: .32rem;
+    color: var(--rose-dark);
+    font-size: .7rem;
+    font-weight: 800;
+    letter-spacing: .1em;
+}
+.step-progress {
+    width: 100%;
+    height: 3px;
+    margin-bottom: .65rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #eadde0;
+}
+.step-progress span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--rose);
+}
+.step-header h2,
 h2 {
     color: #4b3e41 !important;
-    font-size: clamp(1.3rem, 5.6vw, 1.8rem) !important;
-    line-height: 1.4 !important;
-    margin-top: 2rem !important;
+    font-size: clamp(1.25rem, 4.8vw, 1.65rem) !important;
+    line-height: 1.35 !important;
+    margin: 0 !important;
+    font-weight: 750 !important;
+    word-break: keep-all;
+    overflow-wrap: normal;
 }
 h3 {color: #4b3e41 !important;}
 label, [data-testid="stWidgetLabel"] {color: #514548 !important;}
+/* 補助操作：白地の控えめな枠線ボタン */
 div.stButton > button {
     width: 100%;
-    min-height: 3.15rem;
-    border: 1px solid var(--rose) !important;
+    min-height: var(--button-height);
+    border: 1px solid #b98a93 !important;
     border-radius: 999px;
-    background: var(--rose) !important;
-    color: white !important;
+    background: #fffdfb !important;
+    color: var(--rose-dark) !important;
     font-weight: 700;
-    box-shadow: 0 7px 18px rgba(135, 81, 92, .18);
+    box-shadow: none;
 }
 div.stButton > button p,
 div.stButton > button span {
-    color: white !important;
-    -webkit-text-fill-color: white !important;
+    color: var(--rose-dark) !important;
+    -webkit-text-fill-color: var(--rose-dark) !important;
 }
 div.stButton > button:hover {
-    background: var(--rose-dark) !important;
+    background: var(--rose-pale) !important;
     border-color: var(--rose-dark) !important;
 }
-div.stDownloadButton > button {
+/* メイン操作：くすみピンク＋白文字 */
+div.stButton > button[kind="primary"] {
+    min-height: 3.2rem;
+    background: var(--rose) !important;
     border-color: var(--rose) !important;
+    color: #ffffff !important;
+    box-shadow: 0 7px 18px rgba(135, 81, 92, .18);
+}
+div.stButton > button[kind="primary"] p,
+div.stButton > button[kind="primary"] span {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+}
+div.stButton > button[kind="primary"]:hover {
+    background: var(--rose-dark) !important;
+}
+div.stButton > button:disabled {
+    background: #eee4e6 !important;
+    border-color: #d8c6ca !important;
+    color: #675b5e !important;
+    opacity: 1 !important;
+}
+div.stButton > button:disabled * {
+    color: #675b5e !important;
+    -webkit-text-fill-color: #675b5e !important;
+}
+/* 保存操作：濃色＋白文字 */
+div.stDownloadButton > button {
+    min-height: var(--button-height);
+    border-color: #43383a !important;
     border-radius: 999px;
-    color: var(--rose-dark) !important;
+    background: #43383a !important;
+    color: #ffffff !important;
 }
 div.stDownloadButton > button p,
 div.stDownloadButton > button span {
-    color: var(--rose-dark) !important;
-    -webkit-text-fill-color: var(--rose-dark) !important;
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
 }
 [data-testid="stFileUploader"] button,
 [data-testid="stCameraInput"] button {
@@ -405,15 +495,50 @@ div.stDownloadButton > button span {
     border-radius: 18px !important;
     background: rgba(255, 255, 255, .72);
 }
+.order-card {
+    margin: .45rem 0 .65rem;
+    padding: 1rem;
+    border: 1px solid #d8c6ca;
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, .88);
+    color: var(--ink);
+    font-size: .94rem;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    box-shadow: 0 5px 16px rgba(93, 62, 68, .05);
+}
+.zoom-sheet {
+    width: 100%;
+    max-height: 72vh;
+    overflow: auto;
+    padding: .5rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #ffffff;
+    -webkit-overflow-scrolling: touch;
+}
+.zoom-sheet img {
+    display: block;
+    width: 1000px;
+    max-width: none;
+    height: auto;
+}
 [data-testid="stAlert"] {border-radius: 16px;}
 hr {border-color: var(--line) !important;}
 .stCaption, [data-testid="stCaptionContainer"] {color: var(--muted) !important;}
 @media (max-width: 640px) {
-    .block-container {padding-left: 1rem; padding-right: 1rem;}
+    .block-container {padding-left: 1rem; padding-right: 1rem; padding-bottom: 3rem;}
     .hero {padding: 1.55rem 1rem 1.3rem; border-radius: 20px;}
     .hero-illustration {width: 92px; height: 132px;}
     .hero h1 {font-size: clamp(1.35rem, 6.5vw, 1.75rem); letter-spacing: 0;}
     .style-card {padding: .9rem;}
+    .step-header {margin-top: 1.7rem;}
+    .step-header h2, h2 {
+        font-size: clamp(1.05rem, 4.65vw, 1.3rem) !important;
+        white-space: nowrap;
+    }
+    .before-after {grid-template-columns: 48% 48%; justify-content: space-between; gap: 0;}
+    .before-after img {border-radius: 12px;}
 }
 </style>
 """, unsafe_allow_html=True)
@@ -697,7 +822,7 @@ def image_to_pdf_bytes(image):
     return output.getvalue()
 
 
-st.subheader("1. 顔写真を用意")
+render_step(1, "顔写真を用意")
 camera_photo = st.camera_input("顔写真を撮る", key="camera_photo")
 selected_photo = None
 if camera_photo is None:
@@ -730,7 +855,7 @@ if uploaded:
         st.error("写真を読み込めませんでした。撮り直すか、別の写真を選んでください。")
         st.stop()
 
-    st.subheader("2. おすすめを見る")
+    render_step(2, "おすすめを見る")
     style_category = st.selectbox(
         "希望するスタイル",
         ["レディース", "メンズ"],
@@ -789,7 +914,7 @@ if uploaded:
                 st.error("提案を作成できませんでした。少し待ってから、もう一度お試しください。")
 
     if "styles" in st.session_state:
-        st.subheader("3. 気になる案を選ぶ")
+        render_step(3, "気になる案を選ぶ")
         st.caption("各カードの「この案を選ぶ」をタップしてください。案1〜3のどれでも選べます。")
         selected_index = st.session_state.get("selected_style_index", 0)
         if selected_index not in range(len(st.session_state.styles)):
@@ -805,19 +930,17 @@ if uploaded:
             bangs_text = html.escape(style["bangs"])
             color_text = html.escape(f"{style['tone']}・{style['color']}")
             reason = html.escape(style["reason"])
-            st.markdown(
-                f'''<article class="{card_class}">
-                    {selected_badge}
-                    <div class="style-card-title">{title}</div>
-                    <div class="style-card-grid">
-                        <div class="style-card-label">髪型</div><div class="style-card-value">{haircut}</div>
-                        <div class="style-card-label">前髪</div><div class="style-card-value">{bangs_text}</div>
-                        <div class="style-card-label">カラー</div><div class="style-card-value">{color_text}</div>
-                    </div>
-                    <div class="style-reason"><strong>この案がおすすめな理由</strong>{reason}</div>
-                </article>''',
-                unsafe_allow_html=True,
+            card_html = (
+                f'<article class="{card_class}">{selected_badge}'
+                f'<div class="style-card-title">{title}</div>'
+                f'<div class="style-card-grid">'
+                f'<div class="style-card-label">髪型</div><div class="style-card-value">{haircut}</div>'
+                f'<div class="style-card-label">前髪</div><div class="style-card-value">{bangs_text}</div>'
+                f'<div class="style-card-label">カラー</div><div class="style-card-value">{color_text}</div>'
+                f'</div><div class="style-reason"><strong>この案がおすすめな理由</strong>{reason}</div>'
+                f'</article>'
             )
+            st.markdown(card_html, unsafe_allow_html=True)
 
             if index - 1 == selected_index:
                 st.button(
@@ -853,22 +976,28 @@ if uploaded:
                     st.error("画像を生成できませんでした。少し待ってから、もう一度お試しください。")
 
     if "after_image" in st.session_state:
-        st.subheader("4. Before / After")
+        render_step(4, "Before / After")
         before_base64 = base64.b64encode(image_buffer.getvalue()).decode("ascii")
         after_base64 = base64.b64encode(st.session_state.after_image).decode("ascii")
-        st.markdown(
-            f'''<div class="before-after">
-                <figure><img src="data:image/jpeg;base64,{before_base64}" alt="元写真"><figcaption>Before</figcaption></figure>
-                <figure><img src="data:image/jpeg;base64,{after_base64}" alt="生成後の写真"><figcaption>After</figcaption></figure>
-            </div>''',
-            unsafe_allow_html=True,
+        comparison_html = (
+            f'<div class="before-after">'
+            f'<figure><img src="data:image/jpeg;base64,{before_base64}" alt="元写真"><figcaption>Before</figcaption></figure>'
+            f'<figure><img src="data:image/jpeg;base64,{after_base64}" alt="生成後の写真"><figcaption>After</figcaption></figure>'
+            f'</div>'
         )
+        st.markdown(comparison_html, unsafe_allow_html=True)
         st.download_button("完成画像を保存", st.session_state.after_image, "hair-style-after.jpg", "image/jpeg", use_container_width=True)
 
-        st.subheader("5. 美容師さん向けオーダー文")
-        st.text_area("このまま美容師さんに見せられます", st.session_state.selected_style["order"], height=160)
+        render_step(5, "美容師さん向けオーダー文")
+        st.caption("このまま美容師さんに見せたり、LINEや予約フォームへ貼り付けたりできます。")
+        order_text = st.session_state.selected_style["order"]
+        st.markdown(
+            f'<div class="order-card">{html.escape(order_text)}</div>',
+            unsafe_allow_html=True,
+        )
+        render_copy_button(order_text)
 
-        st.subheader("6. お願いシートを作る")
+        render_step(6, "お願いシートを作る")
         st.caption("正面・耳かけ・耳まわり・後ろ姿とオーダー内容を1枚にまとめます。追加の画像生成処理を行います。")
         show_usage_cost(SHEET_COST_TEXT)
         if st.button("美容師さんお願いシートを作る", type="primary"):
@@ -888,6 +1017,14 @@ if uploaded:
 
         if "style_sheet_png" in st.session_state:
             st.image(st.session_state.style_sheet_png, caption="美容師向けスタイルシート", use_container_width=True)
+            with st.expander("🔍 拡大して見る"):
+                sheet_base64 = base64.b64encode(st.session_state.style_sheet_png).decode("ascii")
+                st.caption("画像を左右に動かして、細部を確認できます。")
+                st.markdown(
+                    f'<div class="zoom-sheet"><img src="data:image/png;base64,{sheet_base64}" '
+                    f'alt="美容師向けスタイルシートの拡大表示"></div>',
+                    unsafe_allow_html=True,
+                )
             download_left, download_right = st.columns(2)
             with download_left:
                 st.download_button(
@@ -900,7 +1037,7 @@ if uploaded:
                     use_container_width=True
                 )
 
-        st.subheader("7. もう一度作る")
+        render_step(7, "もう一度作る")
         retry_left, retry_right = st.columns(2)
         with retry_left:
             st.button(
