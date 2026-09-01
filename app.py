@@ -147,9 +147,7 @@ st.markdown("""
     color: var(--muted) !important;
 }
 .stApp input,
-.stApp textarea,
-.stApp [data-baseweb="select"] span,
-.stApp [data-baseweb="select"] div {
+.stApp textarea {
     color: var(--ink) !important;
     -webkit-text-fill-color: var(--ink) !important;
 }
@@ -159,23 +157,39 @@ st.markdown("""
     -webkit-text-fill-color: #9b8d90 !important;
     opacity: 1;
 }
-/* プルダウンをOS・ブラウザの配色に左右されず読みやすくする */
+/* プルダウンは端末のテーマに左右されない濃色背景＋明色文字 */
 [data-baseweb="select"] > div {
-    background: #ffffff !important;
-    color: var(--ink) !important;
+    background: #292933 !important;
+    border-color: #b98a93 !important;
+    border-radius: 13px !important;
+    color: #ffffff !important;
+}
+[data-baseweb="select"] > div *,
+[data-baseweb="select"] span,
+[data-baseweb="select"] input {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+    opacity: 1 !important;
+}
+[data-baseweb="select"] svg {
+    fill: #ffffff !important;
+    color: #ffffff !important;
 }
 [data-baseweb="popover"],
 [data-baseweb="popover"] ul[role="listbox"] {
-    background: #ffffff !important;
+    background: #292933 !important;
 }
 [data-baseweb="popover"] li[role="option"] {
-    background: #ffffff !important;
-    color: var(--ink) !important;
-    -webkit-text-fill-color: var(--ink) !important;
+    background: #292933 !important;
+    color: #f8f5f6 !important;
+    -webkit-text-fill-color: #f8f5f6 !important;
 }
 [data-baseweb="popover"] li[role="option"] * {
-    color: var(--ink) !important;
-    -webkit-text-fill-color: var(--ink) !important;
+    color: #f8f5f6 !important;
+    -webkit-text-fill-color: #f8f5f6 !important;
+}
+[data-baseweb="popover"] li[role="option"]:hover {
+    background: #49404a !important;
 }
 [data-baseweb="popover"] li[role="option"][aria-selected="true"] {
     background: var(--rose-dark) !important;
@@ -335,6 +349,17 @@ st.markdown("""
     margin-bottom: .2rem;
     color: var(--rose-dark);
 }
+.style-constraints {
+    margin-top: .75rem;
+    padding: .65rem .75rem;
+    border: 1px solid #e2d3d6;
+    border-radius: 10px;
+    background: #fffaf9;
+    color: #5f5255;
+    font-size: .82rem;
+    line-height: 1.6;
+}
+.style-constraints strong {color: var(--rose-dark);}
 .selected-summary {
     margin: .6rem 0;
     padding: .75rem .85rem;
@@ -482,7 +507,6 @@ div.stDownloadButton > button span {
     background: rgba(255, 255, 255, .76);
     padding: .25rem;
 }
-[data-baseweb="select"] > div,
 [data-baseweb="input"] > div,
 [data-testid="stTextInputRootElement"],
 [data-testid="stTextArea"] textarea {
@@ -597,14 +621,54 @@ def normalized_image_bytes(uploaded_file):
     return image, buffer
 
 
+def preference_notes(choices):
+    """ユーザーが明示した条件だけを、後工程で使える短い文章にする。"""
+    hair_items = []
+    for label in ("髪質", "毛量", "髪の太さ", "クセ"):
+        value = choices.get(label, "おまかせ")
+        if value != "おまかせ":
+            hair_items.append(f"{label}：{value}")
+
+    treatment_items = []
+    for label in ("スタイリング剤", "パーマ", "ブリーチ", "ストレート／縮毛矯正"):
+        value = choices.get(label, "おまかせ")
+        if value != "おまかせ":
+            treatment_items.append(f"{label}：{value}")
+
+    wishes = choices.get("細かい希望・叶えたいこと", [])
+    notes = []
+    if hair_items:
+        notes.append("髪の特徴／" + "、".join(hair_items))
+    if treatment_items:
+        notes.append("施術条件／" + "、".join(treatment_items))
+    if wishes:
+        notes.append("希望／" + "、".join(wishes))
+    return notes
+
+
 def propose_styles(client, image_buffer, choices):
     encoded = base64.b64encode(image_buffer.getvalue()).decode("utf-8")
     prompt = f"""
 あなたは実務経験のある日本の美容師です。写真と希望条件から、現実に美容室で再現できる髪型・髪色を3案提案してください。
 希望条件: {json.dumps(choices, ensure_ascii=False)}
 写真から年齢、人種、健康状態などを断定しないでください。顔立ちの優劣を評価せず、髪と顔まわりの見た目のバランス、希望条件、再現性を中心に考えてください。
-異なる方向性の提案を必ず3件作ってください。おまかせ項目は写真との調和を考えて具体化してください。
-titleは短い名称、haircutは長さ・形・レイヤー等、bangsは前髪、toneは数字を含むトーン、colorは髪色、reasonは似合いそうな理由を60字以内、orderは美容師へそのまま見せられる具体的なオーダー文にしてください。
+写真から髪質・毛量・髪の太さ・クセを断定しないでください。これらはユーザーが「おまかせ」以外を入力した場合だけ確定条件として扱ってください。
+顔型を「丸顔」「面長」などと断定せず、「顔まわりに縦のラインを作るとすっきり見えやすい」のように、髪型との関係を自然に説明してください。
+年代を推測して髪型を限定せず、希望する雰囲気を優先してください。
+異なる方向性の提案を必ず3件作ってください。おまかせ項目は写真との調和と日常の再現性を考えて具体化してください。
+3案は、顔まわりとの相性、長さ・前髪・カラー・雰囲気、入力された髪の特徴、施術条件、スタイリング条件、叶えたいことを総合して作成してください。
+次の制約は必ず守ってください。
+- パーマが「なし」なら、パーマ前提の髪型や仕上げを提案しない。
+- ブリーチが「したくない」なら、ブリーチ必須の色を提案しない。
+- ストレート／縮毛矯正が「したくない」なら、その施術前提の髪型を提案しない。
+- スタイリング剤が「ワックスなし」なら、ワックス必須のセットを提案しない。
+- 「ブリーチなしで楽しみたい」が選ばれている場合も、ブリーチ必須のカラーを提案しない。
+- 「パーマ希望」「ブリーチ希望」「ストレート／縮毛矯正を希望する」は提案内容とオーダー文へ明確に反映する。
+- 選択された「細かい希望・叶えたいこと」は、少なくともreasonとorderへ具体的に反映する。
+スタイリング剤が「ワックスなし」の場合は、乾かすだけでもまとまりやすく、ワックスを使わず再現しやすいカットを全案で優先してください。
+スタイリング剤が「ワックスあり」の場合は、ワックス等でセットすることを前提とした髪型も提案できます。
+スタイリング剤の希望はhaircut、reason、orderへ具体的に反映し、orderには自宅でのセット方法も短く含めてください。
+titleは短い名称、haircutは長さ・形・レイヤー等、bangsは前髪、toneは数字を含むトーン、colorは髪色、reasonは似合いそうな理由を90字以内、orderは美容師へそのまま見せられる具体的なオーダー文にしてください。
 """
     response = client.responses.parse(
         model="gpt-5-mini",
@@ -619,7 +683,23 @@ titleは短い名称、haircutは長さ・形・レイヤー等、bangsは前髪
     )
     if response.output_parsed is None:
         raise ValueError("提案データを取得できませんでした。")
-    return [style.model_dump() for style in response.output_parsed.styles]
+    styling = choices.get("スタイリング剤", "おまかせ")
+    notes = preference_notes(choices)
+    styles = []
+    for parsed_style in response.output_parsed.styles:
+        style = parsed_style.model_dump()
+        style["preferences"] = choices
+        style["preference_notes"] = notes
+        if choices.get("スタイル区分") == "メンズ":
+            style["styling"] = styling
+            if styling == "ワックスなし" and "ワックス" not in style["order"]:
+                style["order"] += " スタイリング剤を使わなくても、乾かすだけでまとまりやすいカットを希望します。"
+            elif styling == "ワックスあり" and "ワックス" not in style["order"]:
+                style["order"] += " ワックスを使って動きと束感を出しやすい仕上がりを希望します。"
+        if notes:
+            style["order"] += " 希望条件は、" + "。".join(notes) + "です。"
+        styles.append(style)
+    return styles
 
 
 def edit_hairstyle(client, image_buffer, style):
@@ -631,6 +711,10 @@ Create a natural, photorealistic Japanese hair-salon result with believable hair
 Requested haircut: {style['haircut']}.
 Bangs: {style['bangs']}.
 Hair color: {style['tone']}、{style['color']}.
+Styling product preference: {style.get('styling', 'おまかせ')}.
+User hair characteristics, treatment constraints, and wishes: {json.dumps(style.get('preferences', {}), ensure_ascii=False)}.
+If the preference is ワックスなし, make the hairstyle look natural and manageable without styling products. If it is ワックスあり, show a realistic wax-styled finish with appropriate texture and movement.
+Respect every explicit treatment constraint. Do not depict a permed finish when perm is なし, a bleach-dependent color when bleach is したくない, or a chemically straightened finish when straightening is したくない.
 Preserve everything outside the hair region.
 """
     image_buffer.seek(0)
@@ -660,7 +744,8 @@ Panel 1: three-quarter side view with the hair naturally tucked behind one ear s
 Panel 2: close-up detail of the ear area, hairline, inner color, strands, and layering.
 Panel 3: centered back view showing the full haircut shape, length, layers, and color placement; face must not be visible.
 Use neutral salon lighting and a plain warm-white background.
-Requested style: {style['haircut']}; bangs: {style['bangs']}; color: {style['tone']} {style['color']}.
+Requested style: {style['haircut']}; bangs: {style['bangs']}; color: {style['tone']} {style['color']}; styling product: {style.get('styling', 'おまかせ')}.
+User constraints: {json.dumps(style.get('preferences', {}), ensure_ascii=False)}. Respect all explicit no-treatment constraints and reproduce a finish consistent with the user's hair characteristics and wishes.
 """
     result = client.images.edit(
         model="gpt-image-1.5",
@@ -779,10 +864,18 @@ def create_style_sheet(after_bytes, detail_bytes, style):
 
     panel_x = 1250
     panel_w = 510
+    overview_items = [style["haircut"], f"前髪：{style['bangs']}", f"カラー：{style['tone']}・{style['color']}"]
+    if "styling" in style:
+        overview_items.append(f"スタイリング剤：{style['styling']}")
+    condition_items = style.get("preference_notes") or [
+        f"明るさは{style['tone']}を目安",
+        f"色味は{style['color']}",
+        "現在の髪色や髪質に合わせて美容師と微調整",
+    ]
     sections = [
-        ("スタイル概要", [style["haircut"], f"前髪：{style['bangs']}", f"カラー：{style['tone']}・{style['color']}"]),
+        ("スタイル概要", overview_items),
         ("見せたい印象", [style["reason"]]),
-        ("カラーの考え方", [f"明るさは{style['tone']}を目安", f"色味は{style['color']}", "現在の髪色や髪質に合わせて美容師と微調整"]),
+        ("施術・髪の条件", condition_items),
     ]
     top = 145
     for heading, bullets in sections:
@@ -877,6 +970,16 @@ if uploaded:
     color = "おまかせ"
     custom_color = ""
     tone = "おまかせ"
+    hair_texture = "おまかせ"
+    hair_volume = "おまかせ"
+    hair_thickness = "おまかせ"
+    hair_curl = "おまかせ"
+    styling = "おまかせ"
+    perm = "おまかせ"
+    bleach = "おまかせ"
+    straightening = "おまかせ"
+    detailed_wishes = []
+
     with st.expander("希望があれば指定する（任意）"):
         mood = st.selectbox("なりたい雰囲気", mood_options, key=f"mood_{style_category}")
         length = st.selectbox("髪の長さ", length_options, key=f"length_{style_category}")
@@ -890,6 +993,63 @@ if uploaded:
                 ["おまかせ"] + [f"{number}トーン" for number in range(1, 16)],
             )
 
+    with st.expander("髪の特徴（任意）"):
+        st.caption("分かる項目だけ選んでください。写真だけから髪質を断定することはありません。")
+        hair_texture = st.selectbox("髪質", ["おまかせ", "柔らかい", "普通", "硬い"], key=f"hair_texture_{style_category}")
+        hair_volume = st.selectbox("毛量", ["おまかせ", "少ない", "普通", "多い"], key=f"hair_volume_{style_category}")
+        hair_thickness = st.selectbox("髪の太さ", ["おまかせ", "細い", "普通", "太い"], key=f"hair_thickness_{style_category}")
+        hair_curl = st.selectbox("クセ", ["おまかせ", "なし／直毛", "少し", "強い"], key=f"hair_curl_{style_category}")
+
+    with st.expander("施術・スタイリングの希望（任意）"):
+        if style_category == "メンズ":
+            styling = st.selectbox(
+                "スタイリング",
+                ["おまかせ", "ワックスあり", "ワックスなし"],
+                help="ワックスなしでは、乾かすだけでもまとまりやすい髪型を優先します。",
+                key="styling_mens",
+            )
+            perm = st.selectbox(
+                "パーマ",
+                ["おまかせ", "なし", "ありでもOK", "パーマ希望"],
+                key="perm_mens",
+            )
+        else:
+            perm = st.selectbox(
+                "パーマ",
+                ["おまかせ", "なし", "ありでもOK", "パーマ希望"],
+                key="perm_ladies",
+            )
+            bleach = st.selectbox(
+                "ブリーチ",
+                ["おまかせ", "したくない", "してもOK", "ブリーチ希望"],
+                key="bleach_ladies",
+            )
+            straightening = st.selectbox(
+                "ストレート／縮毛矯正",
+                ["おまかせ", "したくない", "してもOK", "希望する"],
+                key="straightening_ladies",
+            )
+
+    with st.expander("細かい希望・叶えたいこと（任意）"):
+        if style_category == "メンズ":
+            detailed_wishes = st.multiselect(
+                "当てはまるものを選択",
+                ["センターパート", "マッシュ", "ツーブロック", "刈り上げ", "前髪を上げたい", "前髪を下ろしたい"],
+                key="wishes_mens",
+                placeholder="希望がある場合だけ選択",
+            )
+        else:
+            detailed_wishes = st.multiselect(
+                "当てはまるものを選択",
+                [
+                    "小顔に見せたい", "顔まわりをカバーしたい", "伸ばしかけでも整えたい",
+                    "朝のセットを楽にしたい", "ブリーチなしで楽しみたい", "白髪を目立ちにくくしたい",
+                    "ボリュームを出したい", "ボリュームを抑えたい", "まとまりやすくしたい",
+                ],
+                key="wishes_ladies",
+                placeholder="希望がある場合だけ選択",
+            )
+
     choices = {
         "スタイル区分": style_category,
         "雰囲気": mood,
@@ -897,7 +1057,18 @@ if uploaded:
         "前髪": bangs,
         "髪色": custom_color or color,
         "明るさ": tone,
+        "髪質": hair_texture,
+        "毛量": hair_volume,
+        "髪の太さ": hair_thickness,
+        "クセ": hair_curl,
+        "パーマ": perm,
+        "細かい希望・叶えたいこと": detailed_wishes,
     }
+    if style_category == "メンズ":
+        choices["スタイリング剤"] = styling
+    else:
+        choices["ブリーチ"] = bleach
+        choices["ストレート／縮毛矯正"] = straightening
     st.caption("ボタンを押すと、写真が提案のためOpenAI APIへ送信されます。")
 
     show_usage_cost(PROPOSAL_COST_TEXT)
@@ -929,6 +1100,14 @@ if uploaded:
             haircut = html.escape(style["haircut"])
             bangs_text = html.escape(style["bangs"])
             color_text = html.escape(f"{style['tone']}・{style['color']}")
+            styling_row = ""
+            if "styling" in style:
+                styling_text = html.escape(style["styling"])
+                styling_row = f'<div class="style-card-label">セット</div><div class="style-card-value">{styling_text}</div>'
+            constraint_html = ""
+            if style.get("preference_notes"):
+                constraints = html.escape("／".join(style["preference_notes"]))
+                constraint_html = f'<div class="style-constraints"><strong>反映する希望条件</strong><br>{constraints}</div>'
             reason = html.escape(style["reason"])
             card_html = (
                 f'<article class="{card_class}">{selected_badge}'
@@ -937,7 +1116,8 @@ if uploaded:
                 f'<div class="style-card-label">髪型</div><div class="style-card-value">{haircut}</div>'
                 f'<div class="style-card-label">前髪</div><div class="style-card-value">{bangs_text}</div>'
                 f'<div class="style-card-label">カラー</div><div class="style-card-value">{color_text}</div>'
-                f'</div><div class="style-reason"><strong>この案がおすすめな理由</strong>{reason}</div>'
+                f'{styling_row}'
+                f'</div>{constraint_html}<div class="style-reason"><strong>この案がおすすめな理由</strong>{reason}</div>'
                 f'</article>'
             )
             st.markdown(card_html, unsafe_allow_html=True)
