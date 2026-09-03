@@ -5,6 +5,11 @@ import importlib.util
 import io
 import json
 import logging
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
 from pathlib import Path
 
 import streamlit as st
@@ -26,6 +31,7 @@ RESULT_STATE_KEYS = (
     "selected_style",
     "style_sheet_png",
     "style_sheet_pdf",
+    "saved_style_record",
 )
 
 # 将来、利用料金やクレジット数を案内する場合は True に変更します。
@@ -44,7 +50,10 @@ def restart_with_same_photo():
 
 def restart_with_new_photo():
     """Clear the current flow and return to the first screen."""
+    auth = st.session_state.get("auth")
     st.session_state.clear()
+    if auth:
+        st.session_state.auth = auth
 
 
 def show_usage_cost(message):
@@ -85,6 +94,332 @@ def render_copy_button(order_text):
         </script></body></html>''',
         height=52,
     )
+
+
+def supabase_config():
+    try:
+        return st.secrets["SUPABASE_URL"].rstrip("/"), st.secrets["SUPABASE_ANON_KEY"]
+    except KeyError:
+        return None, None
+
+
+def request_json(method, url, headers=None, payload=None):
+    request_headers = {"Content-Type": "application/json", **(headers or {})}
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
+    request = urllib.request.Request(url, data=body, headers=request_headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            raw = response.read()
+            return json.loads(raw.decode("utf-8")) if raw else None
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            detail = json.loads(raw)
+            message = detail.get("msg") or detail.get("message") or detail.get("error_description") or raw
+        except json.JSONDecodeError:
+            message = raw
+        raise RuntimeError(str(message)) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError("Supabaseへ接続できませんでした。通信状態を確認してください。") from exc
+
+
+def set_auth_session(auth_data, email=None):
+    user = auth_data.get("user") or {}
+    st.session_state.auth = {
+        "access_token": auth_data["access_token"],
+        "refresh_token": auth_data["refresh_token"],
+        "expires_at": time.time() + int(auth_data.get("expires_in", 3600)),
+        "user_id": user.get("id"),
+        "email": user.get("email") or email,
+    }
+
+
+def sign_in(email, password):
+    url, anon_key = supabase_config()
+    data = request_json(
+        "POST",
+        f"{url}/auth/v1/token?grant_type=password",
+        headers={"apikey": anon_key},
+        payload={"email": email, "password": password},
+    )
+    set_auth_session(data, email)
+
+
+def sign_up(email, password):
+    url, anon_key = supabase_config()
+    data = request_json(
+        "POST",
+        f"{url}/auth/v1/signup",
+        headers={"apikey": anon_key},
+        payload={"email": email, "password": password},
+    )
+    if data and data.get("access_token"):
+        set_auth_session(data, email)
+        return True
+    return False
+
+
+def current_auth():
+    auth = st.session_state.get("auth")
+    if not auth:
+        return None
+    if time.time() < auth.get("expires_at", 0) - 60:
+        return auth
+    url, anon_key = supabase_config()
+    try:
+        data = request_json(
+            "POST",
+            f"{url}/auth/v1/token?grant_type=refresh_token",
+            headers={"apikey": anon_key},
+            payload={"refresh_token": auth["refresh_token"]},
+        )
+        set_auth_session(data, auth.get("email"))
+        return st.session_state.auth
+    except RuntimeError:
+        st.session_state.pop("auth", None)
+        return None
+
+
+def private_headers(prefer=None):
+    url, anon_key = supabase_config()
+    auth = current_auth()
+    if not auth:
+        raise RuntimeError("ログインの有効期限が切れました。もう一度ログインしてください。")
+    headers = {"apikey": anon_key, "Authorization": f"Bearer {auth['access_token']}"}
+    if prefer:
+        headers["Prefer"] = prefer
+    return url, headers, auth
+
+
+def upload_private_object(path, content, content_type):
+    url, headers, _ = private_headers()
+    object_url = f"{url}/storage/v1/object/hair-style-saves/{urllib.parse.quote(path, safe='/')}"
+    request = urllib.request.Request(
+        object_url,
+        data=content,
+        headers={**headers, "Content-Type": content_type, "x-upsert": "false"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"画像を保存できませんでした：{detail}") from exc
+
+
+def download_private_object(path):
+    url, headers, _ = private_headers()
+    object_url = f"{url}/storage/v1/object/authenticated/hair-style-saves/{urllib.parse.quote(path, safe='/')}"
+    request = urllib.request.Request(object_url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.read()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError("保存画像を読み込めませんでした。") from exc
+
+
+def delete_private_object(path):
+    if not path:
+        return
+    url, headers, _ = private_headers()
+    object_url = f"{url}/storage/v1/object/hair-style-saves/{urllib.parse.quote(path, safe='/')}"
+    request = urllib.request.Request(object_url, headers=headers, method="DELETE")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            response.read()
+    except urllib.error.HTTPError:
+        pass
+
+
+def insert_style_record(record):
+    url, headers, _ = private_headers("return=representation")
+    result = request_json("POST", f"{url}/rest/v1/style_saves", headers=headers, payload=record)
+    return result[0]
+
+
+def update_style_record(record_id, changes):
+    url, headers, _ = private_headers("return=representation")
+    result = request_json(
+        "PATCH",
+        f"{url}/rest/v1/style_saves?id=eq.{urllib.parse.quote(record_id)}",
+        headers=headers,
+        payload=changes,
+    )
+    return result[0]
+
+
+def list_style_records():
+    url, headers, _ = private_headers()
+    result = request_json(
+        "GET",
+        f"{url}/rest/v1/style_saves?select=*&order=created_at.desc",
+        headers=headers,
+    )
+    return result or []
+
+
+def delete_style_record(record):
+    for field in ("after_path", "sheet_png_path", "sheet_pdf_path"):
+        delete_private_object(record.get(field))
+    url, headers, _ = private_headers()
+    request_json(
+        "DELETE",
+        f"{url}/rest/v1/style_saves?id=eq.{urllib.parse.quote(record['id'])}",
+        headers=headers,
+    )
+
+
+def save_current_style(after_bytes, style, sheet_png=None, sheet_pdf=None):
+    auth = current_auth()
+    if not auth:
+        raise RuntimeError("保存するにはログインが必要です。")
+    existing = st.session_state.get("saved_style_record")
+    if existing:
+        changes = {}
+        folder = existing["after_path"].rsplit("/", 1)[0]
+        if sheet_png and not existing.get("sheet_png_path"):
+            png_path = f"{folder}/style-sheet.png"
+            pdf_path = f"{folder}/style-sheet.pdf"
+            upload_private_object(png_path, sheet_png, "image/png")
+            upload_private_object(pdf_path, sheet_pdf, "application/pdf")
+            changes = {"sheet_png_path": png_path, "sheet_pdf_path": pdf_path}
+        if changes:
+            existing = update_style_record(existing["id"], changes)
+            st.session_state.saved_style_record = existing
+            return existing, True
+        return existing, False
+
+    folder = f"{auth['user_id']}/{uuid.uuid4()}"
+    after_path = f"{folder}/after.jpg"
+    png_path = f"{folder}/style-sheet.png" if sheet_png else None
+    pdf_path = f"{folder}/style-sheet.pdf" if sheet_pdf else None
+    uploaded_paths = []
+    try:
+        upload_private_object(after_path, after_bytes, "image/jpeg")
+        uploaded_paths.append(after_path)
+        if sheet_png:
+            upload_private_object(png_path, sheet_png, "image/png")
+            uploaded_paths.append(png_path)
+            upload_private_object(pdf_path, sheet_pdf, "application/pdf")
+            uploaded_paths.append(pdf_path)
+        record = insert_style_record({
+            "user_id": auth["user_id"],
+            "title": style["title"],
+            "style_data": style,
+            "order_text": style["order"],
+            "after_path": after_path,
+            "sheet_png_path": png_path,
+            "sheet_pdf_path": pdf_path,
+        })
+    except Exception:
+        for path in uploaded_paths:
+            delete_private_object(path)
+        raise
+    st.session_state.saved_style_record = record
+    return record, True
+
+
+def render_auth_gate():
+    if current_auth():
+        return
+    st.markdown('<div class="account-card"><strong>非公開で保存するためログインしてください</strong><br>保存した画像やお願いシートは、ご本人のアカウントだけで閲覧できます。</div>', unsafe_allow_html=True)
+    login_tab, signup_tab = st.tabs(["ログイン", "初めての方"])
+    with login_tab:
+        with st.form("login_form"):
+            email = st.text_input("メールアドレス", key="login_email")
+            password = st.text_input("パスワード", type="password", key="login_password")
+            submitted = st.form_submit_button("ログイン", type="primary", use_container_width=True)
+        if submitted:
+            if not email or not password:
+                st.error("メールアドレスとパスワードを入力してください。")
+            else:
+                try:
+                    sign_in(email.strip(), password)
+                    st.rerun()
+                except RuntimeError:
+                    st.error("ログインできませんでした。メールアドレスとパスワードを確認してください。")
+    with signup_tab:
+        with st.form("signup_form"):
+            email = st.text_input("メールアドレス", key="signup_email")
+            password = st.text_input("パスワード（6文字以上）", type="password", key="signup_password")
+            submitted = st.form_submit_button("アカウントを作る", type="primary", use_container_width=True)
+        if submitted:
+            if not email or len(password) < 6:
+                st.error("メールアドレスと6文字以上のパスワードを入力してください。")
+            else:
+                try:
+                    logged_in = sign_up(email.strip(), password)
+                    if logged_in:
+                        st.rerun()
+                    else:
+                        st.success("確認メールを送りました。メール内のリンクを開いた後、ログインしてください。")
+                except RuntimeError as exc:
+                    st.error(f"アカウントを作成できませんでした：{exc}")
+    st.stop()
+
+
+def render_saved_styles():
+    st.markdown('<div class="gallery-intro"><strong>保存したスタイル</strong><br>完成画像・お願いシート・オーダー文を、いつでも確認できます。</div>', unsafe_allow_html=True)
+    try:
+        records = list_style_records()
+    except RuntimeError as exc:
+        st.error(f"保存データを読み込めませんでした：{exc}")
+        return
+    if not records:
+        st.info("保存したスタイルはまだありません。")
+        return
+
+    for index, record in enumerate(records):
+        created = (record.get("created_at") or "")[:10].replace("-", "/")
+        title = record.get("title") or "保存したスタイル"
+        with st.expander(f"{title}　{created}", expanded=index == 0):
+            try:
+                after_bytes = download_private_object(record["after_path"])
+                st.image(after_bytes, caption="完成イメージ", use_container_width=True)
+                st.download_button(
+                    "完成画像を端末に保存",
+                    after_bytes,
+                    f"hair-style-{record['id'][:8]}.jpg",
+                    "image/jpeg",
+                    key=f"saved_after_{record['id']}",
+                    use_container_width=True,
+                )
+                order_text = record.get("order_text") or ""
+                if order_text:
+                    st.markdown(f'<div class="order-card">{html.escape(order_text)}</div>', unsafe_allow_html=True)
+                    render_copy_button(order_text)
+                if record.get("sheet_png_path"):
+                    sheet_png = download_private_object(record["sheet_png_path"])
+                    st.image(sheet_png, caption="美容師さんお願いシート", use_container_width=True)
+                    download_left, download_right = st.columns(2)
+                    with download_left:
+                        st.download_button(
+                            "PNGで保存", sheet_png, f"hair-style-sheet-{record['id'][:8]}.png", "image/png",
+                            key=f"saved_png_{record['id']}", use_container_width=True,
+                        )
+                    with download_right:
+                        sheet_pdf = download_private_object(record["sheet_pdf_path"])
+                        st.download_button(
+                            "PDFで保存", sheet_pdf, f"hair-style-sheet-{record['id'][:8]}.pdf", "application/pdf",
+                            key=f"saved_pdf_{record['id']}", use_container_width=True,
+                        )
+            except RuntimeError as exc:
+                st.error(str(exc))
+
+            confirm_delete = st.checkbox("この保存データを削除する", key=f"confirm_delete_{record['id']}")
+            if st.button(
+                "削除を実行",
+                key=f"delete_saved_{record['id']}",
+                disabled=not confirm_delete,
+                use_container_width=True,
+            ):
+                try:
+                    delete_style_record(record)
+                    st.success("削除しました。")
+                    st.rerun()
+                except RuntimeError as exc:
+                    st.error(f"削除できませんでした：{exc}")
 
 
 st.set_page_config(page_title="美容師さんお願いシート", page_icon="🪞", layout="centered")
@@ -157,48 +492,66 @@ st.markdown("""
     -webkit-text-fill-color: #9b8d90 !important;
     opacity: 1;
 }
-/* プルダウンは端末のテーマに左右されない濃色背景＋明色文字 */
-[data-baseweb="select"] > div {
-    background: #292933 !important;
-    border-color: #b98a93 !important;
+/* selectbox / multiselect：入力部だけを限定して明色に固定 */
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stMultiSelect"] [data-baseweb="select"] > div {
+    background: #fffdfb !important;
+    border: 1px solid #d8c6ca !important;
     border-radius: 13px !important;
-    color: #ffffff !important;
+    color: var(--ink) !important;
+    box-shadow: none !important;
 }
-[data-baseweb="select"] > div *,
-[data-baseweb="select"] span,
-[data-baseweb="select"] input {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
+[data-testid="stSelectbox"] [data-baseweb="select"] > div:focus-within,
+[data-testid="stMultiSelect"] [data-baseweb="select"] > div:focus-within {
+    border-color: var(--rose) !important;
+    box-shadow: 0 0 0 1px var(--rose) !important;
+}
+[data-testid="stSelectbox"] [data-baseweb="select"] > div span,
+[data-testid="stSelectbox"] [data-baseweb="select"] > div div,
+[data-testid="stMultiSelect"] [data-baseweb="select"] > div span,
+[data-testid="stMultiSelect"] [data-baseweb="select"] > div div,
+[data-testid="stMultiSelect"] [data-baseweb="select"] input {
+    color: var(--ink) !important;
+    -webkit-text-fill-color: var(--ink) !important;
     opacity: 1 !important;
 }
-[data-baseweb="select"] svg {
-    fill: #ffffff !important;
-    color: #ffffff !important;
+[data-testid="stSelectbox"] [data-baseweb="select"] svg,
+[data-testid="stMultiSelect"] [data-baseweb="select"] svg {
+    fill: #514548 !important;
+    color: #514548 !important;
 }
-[data-baseweb="popover"],
+[data-testid="stMultiSelect"] [data-baseweb="tag"] {
+    background: var(--rose-pale) !important;
+    color: var(--ink) !important;
+}
+[data-testid="stMultiSelect"] input::placeholder {
+    color: #716568 !important;
+    -webkit-text-fill-color: #716568 !important;
+    opacity: 1 !important;
+}
+/* 開いた候補一覧はポータル表示されるため、listboxだけを限定 */
 [data-baseweb="popover"] ul[role="listbox"] {
-    background: #292933 !important;
+    background: #fffdfb !important;
+    border: 1px solid #dfd1d4 !important;
 }
 [data-baseweb="popover"] li[role="option"] {
-    background: #292933 !important;
-    color: #f8f5f6 !important;
-    -webkit-text-fill-color: #f8f5f6 !important;
+    background: #fffdfb !important;
+    color: var(--ink) !important;
+    -webkit-text-fill-color: var(--ink) !important;
 }
 [data-baseweb="popover"] li[role="option"] * {
-    color: #f8f5f6 !important;
-    -webkit-text-fill-color: #f8f5f6 !important;
+    color: var(--ink) !important;
+    -webkit-text-fill-color: var(--ink) !important;
 }
-[data-baseweb="popover"] li[role="option"]:hover {
-    background: #49404a !important;
-}
+[data-baseweb="popover"] li[role="option"]:hover,
 [data-baseweb="popover"] li[role="option"][aria-selected="true"] {
-    background: var(--rose-dark) !important;
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
+    background: var(--rose-pale) !important;
+    color: var(--ink) !important;
+    -webkit-text-fill-color: var(--ink) !important;
 }
 [data-baseweb="popover"] li[role="option"][aria-selected="true"] * {
-    color: #ffffff !important;
-    -webkit-text-fill-color: #ffffff !important;
+    color: var(--ink) !important;
+    -webkit-text-fill-color: var(--ink) !important;
 }
 .block-container {
     max-width: 720px;
@@ -283,6 +636,34 @@ st.markdown("""
     color: #5f5255;
     font-size: .84rem;
     line-height: 1.65;
+}
+.account-card,
+.gallery-intro {
+    margin: .5rem 0 1rem;
+    padding: .9rem 1rem;
+    border: 1px solid #dfc9ce;
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, .86);
+    color: #514548;
+    font-size: .86rem;
+    line-height: 1.65;
+}
+.account-card strong,
+.gallery-intro strong {color: var(--rose-dark); font-size: .95rem;}
+.account-line {
+    margin: .15rem 0 .45rem;
+    color: var(--muted);
+    font-size: .78rem;
+    text-align: right;
+}
+.save-note {
+    margin: .65rem 0;
+    padding: .72rem .82rem;
+    border-radius: 12px;
+    background: #f7edef;
+    color: #5f5255;
+    font-size: .8rem;
+    line-height: 1.55;
 }
 .cost-note {
     margin-bottom: .55rem;
@@ -507,6 +888,37 @@ div.stDownloadButton > button span {
     background: rgba(255, 255, 255, .76);
     padding: .25rem;
 }
+/* expander：見出しと本文をボタンCSSから完全に分離 */
+[data-testid="stExpander"] details {
+    overflow: hidden;
+    border: 1px solid #dfd1d4 !important;
+    border-radius: var(--radius) !important;
+    background: rgba(255, 255, 255, .76) !important;
+}
+[data-testid="stExpander"] details > summary {
+    min-height: 3rem;
+    background: #fffdfb !important;
+    color: var(--ink) !important;
+}
+[data-testid="stExpander"] details > summary:hover,
+[data-testid="stExpander"] details[open] > summary {
+    background: #f9f1f2 !important;
+}
+[data-testid="stExpander"] details > summary p,
+[data-testid="stExpander"] details > summary span,
+[data-testid="stExpander"] details > summary div {
+    color: var(--ink) !important;
+    -webkit-text-fill-color: var(--ink) !important;
+    opacity: 1 !important;
+}
+[data-testid="stExpander"] details > summary svg {
+    fill: #514548 !important;
+    color: #514548 !important;
+}
+[data-testid="stExpanderDetails"] {
+    background: rgba(255, 253, 251, .96) !important;
+    color: var(--ink) !important;
+}
 [data-baseweb="input"] > div,
 [data-testid="stTextInputRootElement"],
 [data-testid="stTextArea"] textarea {
@@ -531,17 +943,45 @@ div.stDownloadButton > button span {
     white-space: pre-wrap;
     box-shadow: 0 5px 16px rgba(93, 62, 68, .05);
 }
-.zoom-sheet {
+.sheet-overview {
     width: 100%;
-    max-height: 72vh;
-    overflow: auto;
+    overflow: hidden;
     padding: .5rem;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: #ffffff;
+}
+.sheet-overview img {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+}
+.detail-zoom {
+    width: 100%;
+    margin-top: .7rem;
+    overflow: hidden;
+    border: 1px solid #dfd1d4;
+    border-radius: 12px;
+    background: #fffdfb;
+}
+.detail-zoom > summary {
+    padding: .7rem .8rem;
+    background: #f9f1f2 !important;
+    color: var(--ink) !important;
+    font-size: .84rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+.zoom-scroll {
+    width: 100%;
+    max-height: 68vh;
+    overflow: auto;
+    padding: .5rem;
+    background: #ffffff;
     -webkit-overflow-scrolling: touch;
 }
-.zoom-sheet img {
+.zoom-scroll img {
     display: block;
     width: 1000px;
     max-width: none;
@@ -587,6 +1027,32 @@ st.markdown(f"""
   <div class="hero-pills"><span>似合う髪型を3案</span><span>完成イメージ</span><span>PNG・PDF保存</span></div>
 </section>
 """, unsafe_allow_html=True)
+
+supabase_url, supabase_anon_key = supabase_config()
+if not supabase_url or not supabase_anon_key:
+    st.error("保存機能の初期設定が必要です。Streamlit SecretsにSUPABASE_URLとSUPABASE_ANON_KEYを追加してください。")
+    st.stop()
+
+render_auth_gate()
+auth = current_auth()
+account_left, account_right = st.columns([3, 1])
+with account_left:
+    st.markdown(f'<div class="account-line">ログイン中：{html.escape(auth.get("email") or "")}</div>', unsafe_allow_html=True)
+with account_right:
+    if st.button("ログアウト", key="logout", use_container_width=True):
+        st.session_state.clear()
+        st.rerun()
+
+page = st.radio(
+    "表示する画面",
+    ["新しく作る", "保存したスタイル"],
+    horizontal=True,
+    label_visibility="collapsed",
+    key="main_page",
+)
+if page == "保存したスタイル":
+    render_saved_styles()
+    st.stop()
 
 
 class HairStyle(BaseModel):
@@ -927,11 +1393,11 @@ if camera_photo is None:
             key="selected_photo",
         )
 uploaded = camera_photo or selected_photo
-st.caption("顔と髪全体が入るように、明るい場所で撮影してください。写真は本アプリには保存されません。")
+st.caption("顔と髪全体が入るように、明るい場所で撮影してください。撮影した元写真は保存されません。")
 st.markdown(
     '<div class="privacy-note"><strong>写真の取り扱い</strong><br>'
     '写真は髪型の提案と完成イメージの生成にだけ使用し、OpenAI APIへ一時的に送信します。'
-    '本アプリやSupabaseには保存しません。</div>',
+    '撮影した元写真は保存しません。生成した完成画像・お願いシートは、利用者が「非公開保存」を押した場合だけ、ご本人専用の領域へ保存します。</div>',
     unsafe_allow_html=True,
 )
 
@@ -1151,6 +1617,7 @@ if uploaded:
                     st.session_state.selected_style = selected_style
                     st.session_state.pop("style_sheet_png", None)
                     st.session_state.pop("style_sheet_pdf", None)
+                    st.session_state.pop("saved_style_record", None)
                 except Exception as exc:
                     logger.exception("Failed to generate hairstyle image")
                     st.error("画像を生成できませんでした。少し待ってから、もう一度お試しください。")
@@ -1199,10 +1666,13 @@ if uploaded:
             st.image(st.session_state.style_sheet_png, caption="美容師向けスタイルシート", use_container_width=True)
             with st.expander("🔍 拡大して見る"):
                 sheet_base64 = base64.b64encode(st.session_state.style_sheet_png).decode("ascii")
-                st.caption("画像を左右に動かして、細部を確認できます。")
+                st.caption("まず全体を確認できます。必要な場合だけ「細部をさらに拡大」を開いてください。")
                 st.markdown(
-                    f'<div class="zoom-sheet"><img src="data:image/png;base64,{sheet_base64}" '
-                    f'alt="美容師向けスタイルシートの拡大表示"></div>',
+                    f'<div class="sheet-overview"><img src="data:image/png;base64,{sheet_base64}" '
+                    f'alt="美容師向けスタイルシートの全体表示"></div>'
+                    f'<details class="detail-zoom"><summary>細部をさらに拡大</summary>'
+                    f'<div class="zoom-scroll"><img src="data:image/png;base64,{sheet_base64}" '
+                    f'alt="美容師向けスタイルシートの細部表示"></div></details>',
                     unsafe_allow_html=True,
                 )
             download_left, download_right = st.columns(2)
@@ -1216,6 +1686,32 @@ if uploaded:
                     "PDFで保存", st.session_state.style_sheet_pdf, "hair-style-sheet.pdf", "application/pdf",
                     use_container_width=True
                 )
+
+        st.markdown(
+            '<div class="save-note">「アプリに非公開保存」を押したデータだけ保存されます。'
+            '撮影した元写真は保存されません。保存後は画面上部の「保存したスタイル」からすぐ確認できます。</div>',
+            unsafe_allow_html=True,
+        )
+        save_label = (
+            "完成画像・お願いシートを非公開保存"
+            if "style_sheet_png" in st.session_state
+            else "完成画像・オーダー文を非公開保存"
+        )
+        if st.button(save_label, type="primary", key="save_current_style"):
+            with st.spinner("ご本人専用の保存領域へ保存しています…"):
+                try:
+                    _, changed = save_current_style(
+                        st.session_state.after_image,
+                        st.session_state.selected_style,
+                        st.session_state.get("style_sheet_png"),
+                        st.session_state.get("style_sheet_pdf"),
+                    )
+                    if changed:
+                        st.success("非公開で保存しました。「保存したスタイル」から確認できます。")
+                    else:
+                        st.info("この内容はすでに保存されています。")
+                except RuntimeError as exc:
+                    st.error(f"保存できませんでした：{exc}")
 
         render_step(7, "もう一度作る")
         retry_left, retry_right = st.columns(2)
