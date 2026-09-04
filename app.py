@@ -1051,8 +1051,6 @@ if storage_enabled:
     if page == "保存したスタイル":
         render_saved_styles()
         st.stop()
-else:
-    st.info("現在は端末へのPNG・PDF保存を利用できます。アプリ内の非公開保存は準備中です。")
 
 
 class HairStyle(BaseModel):
