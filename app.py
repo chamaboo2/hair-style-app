@@ -1029,30 +1029,30 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 supabase_url, supabase_anon_key = supabase_config()
-if not supabase_url or not supabase_anon_key:
-    st.error("保存機能の初期設定が必要です。Streamlit SecretsにSUPABASE_URLとSUPABASE_ANON_KEYを追加してください。")
-    st.stop()
+storage_enabled = bool(supabase_url and supabase_anon_key)
+if storage_enabled:
+    render_auth_gate()
+    auth = current_auth()
+    account_left, account_right = st.columns([3, 1])
+    with account_left:
+        st.markdown(f'<div class="account-line">ログイン中：{html.escape(auth.get("email") or "")}</div>', unsafe_allow_html=True)
+    with account_right:
+        if st.button("ログアウト", key="logout", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
 
-render_auth_gate()
-auth = current_auth()
-account_left, account_right = st.columns([3, 1])
-with account_left:
-    st.markdown(f'<div class="account-line">ログイン中：{html.escape(auth.get("email") or "")}</div>', unsafe_allow_html=True)
-with account_right:
-    if st.button("ログアウト", key="logout", use_container_width=True):
-        st.session_state.clear()
-        st.rerun()
-
-page = st.radio(
-    "表示する画面",
-    ["新しく作る", "保存したスタイル"],
-    horizontal=True,
-    label_visibility="collapsed",
-    key="main_page",
-)
-if page == "保存したスタイル":
-    render_saved_styles()
-    st.stop()
+    page = st.radio(
+        "表示する画面",
+        ["新しく作る", "保存したスタイル"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="main_page",
+    )
+    if page == "保存したスタイル":
+        render_saved_styles()
+        st.stop()
+else:
+    st.info("現在は端末へのPNG・PDF保存を利用できます。アプリ内の非公開保存は準備中です。")
 
 
 class HairStyle(BaseModel):
@@ -1687,31 +1687,32 @@ if uploaded:
                     use_container_width=True
                 )
 
-        st.markdown(
-            '<div class="save-note">「アプリに非公開保存」を押したデータだけ保存されます。'
-            '撮影した元写真は保存されません。保存後は画面上部の「保存したスタイル」からすぐ確認できます。</div>',
-            unsafe_allow_html=True,
-        )
-        save_label = (
-            "完成画像・お願いシートを非公開保存"
-            if "style_sheet_png" in st.session_state
-            else "完成画像・オーダー文を非公開保存"
-        )
-        if st.button(save_label, type="primary", key="save_current_style"):
-            with st.spinner("ご本人専用の保存領域へ保存しています…"):
-                try:
-                    _, changed = save_current_style(
-                        st.session_state.after_image,
-                        st.session_state.selected_style,
-                        st.session_state.get("style_sheet_png"),
-                        st.session_state.get("style_sheet_pdf"),
-                    )
-                    if changed:
-                        st.success("非公開で保存しました。「保存したスタイル」から確認できます。")
-                    else:
-                        st.info("この内容はすでに保存されています。")
-                except RuntimeError as exc:
-                    st.error(f"保存できませんでした：{exc}")
+        if storage_enabled:
+            st.markdown(
+                '<div class="save-note">「アプリに非公開保存」を押したデータだけ保存されます。'
+                '撮影した元写真は保存されません。保存後は画面上部の「保存したスタイル」からすぐ確認できます。</div>',
+                unsafe_allow_html=True,
+            )
+            save_label = (
+                "完成画像・お願いシートを非公開保存"
+                if "style_sheet_png" in st.session_state
+                else "完成画像・オーダー文を非公開保存"
+            )
+            if st.button(save_label, type="primary", key="save_current_style"):
+                with st.spinner("ご本人専用の保存領域へ保存しています…"):
+                    try:
+                        _, changed = save_current_style(
+                            st.session_state.after_image,
+                            st.session_state.selected_style,
+                            st.session_state.get("style_sheet_png"),
+                            st.session_state.get("style_sheet_pdf"),
+                        )
+                        if changed:
+                            st.success("非公開で保存しました。「保存したスタイル」から確認できます。")
+                        else:
+                            st.info("この内容はすでに保存されています。")
+                    except RuntimeError as exc:
+                        st.error(f"保存できませんでした：{exc}")
 
         render_step(7, "もう一度作る")
         retry_left, retry_right = st.columns(2)
