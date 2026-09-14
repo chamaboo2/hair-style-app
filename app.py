@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -84,16 +85,34 @@ def render_copy_button(order_text):
         body{{margin:0;background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
         button{{width:100%;height:46px;border:1px solid #87515c;border-radius:999px;background:#43383a;color:#fff;font-size:15px;font-weight:700;cursor:pointer}}
         button:active{{transform:scale(.99)}}
-        </style></head><body><button id="copy">オーダー文をコピー</button><script>
+        </style></head><body><button id="copy">美容師さんに伝える内容をコピー</button><script>
         const text={safe_text}; const button=document.getElementById('copy');
         button.addEventListener('click', async () => {{
           try {{ await navigator.clipboard.writeText(text); }}
           catch (e) {{ const area=document.createElement('textarea'); area.value=text; document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove(); }}
-          button.textContent='コピーしました ✓'; setTimeout(() => button.textContent='オーダー文をコピー', 1800);
+          button.textContent='コピーしました ✓'; setTimeout(() => button.textContent='美容師さんに伝える内容をコピー', 1800);
         }});
         </script></body></html>''',
         height=52,
     )
+
+
+def consultation_note(text):
+    """Turn AI output into a polite consultation memo, not a technical instruction sheet."""
+    adjustment = "髪質や現在の髪の状態を見て、難しい部分は相談しながら調整していただけるとうれしいです。"
+    source = str(text or "").strip()
+    # The current UI does not ask users for exact haircut measurements, so remove
+    # AI-invented cm/mm specifications while retaining user-selected color tones.
+    sentences = [part.strip() for part in re.split(r"(?<=[。！？])|\n+", source) if part.strip()]
+    sentences = [
+        part for part in sentences
+        if not re.search(r"\d+(?:\.\d+)?\s*(?:cm|mm|センチ(?:メートル)?|ミリ(?:メートル)?)", part, re.IGNORECASE)
+    ]
+    sentences = [part for part in sentences if "難しい部分は相談しながら" not in part]
+    body = "".join(sentences).strip()
+    if body and body[-1] not in "。！？":
+        body += "。"
+    return f"{body}{adjustment}" if body else adjustment
 
 
 def supabase_config():
@@ -360,7 +379,7 @@ def render_auth_gate():
 
 
 def render_saved_styles():
-    st.markdown('<div class="gallery-intro"><strong>保存したスタイル</strong><br>完成画像・お願いシート・オーダー文を、いつでも確認できます。</div>', unsafe_allow_html=True)
+    st.markdown('<div class="gallery-intro"><strong>保存したスタイル</strong><br>完成画像・お願いシート・美容師さんに伝えたいことを、いつでも確認できます。</div>', unsafe_allow_html=True)
     try:
         records = list_style_records()
     except RuntimeError as exc:
@@ -385,7 +404,7 @@ def render_saved_styles():
                     key=f"saved_after_{record['id']}",
                     use_container_width=True,
                 )
-                order_text = record.get("order_text") or ""
+                order_text = consultation_note(record.get("order_text") or "")
                 if order_text:
                     st.markdown(f'<div class="order-card">{html.escape(order_text)}</div>', unsafe_allow_html=True)
                     render_copy_button(order_text)
@@ -1022,37 +1041,35 @@ st.markdown(f"""
   {hero_image_html}
   <p class="hero-kicker">HAIR STYLE CONSULTATION</p>
   <h1>美容師さんお願いシート</h1>
-  <p>似合いそうな髪型を試すだけでなく、完成イメージとオーダー内容を、美容師さんにそのまま見せられる一枚にまとめます。</p>
+  <p>似合いそうな髪型を試すだけでなく、完成イメージと伝えたい希望を、美容師さんにそのまま見せられる一枚にまとめます。</p>
   <div class="hero-feature">髪型選びから、美容院で見せるお願いシートまで</div>
   <div class="hero-pills"><span>似合う髪型を3案</span><span>完成イメージ</span><span>PNG・PDF保存</span></div>
 </section>
 """, unsafe_allow_html=True)
 
 supabase_url, supabase_anon_key = supabase_config()
-if not supabase_url or not supabase_anon_key:
-    st.error("保存機能の初期設定が必要です。Streamlit SecretsにSUPABASE_URLとSUPABASE_ANON_KEYを追加してください。")
-    st.stop()
+storage_enabled = bool(supabase_url and supabase_anon_key)
+if storage_enabled:
+    render_auth_gate()
+    auth = current_auth()
+    account_left, account_right = st.columns([3, 1])
+    with account_left:
+        st.markdown(f'<div class="account-line">ログイン中：{html.escape(auth.get("email") or "")}</div>', unsafe_allow_html=True)
+    with account_right:
+        if st.button("ログアウト", key="logout", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
 
-render_auth_gate()
-auth = current_auth()
-account_left, account_right = st.columns([3, 1])
-with account_left:
-    st.markdown(f'<div class="account-line">ログイン中：{html.escape(auth.get("email") or "")}</div>', unsafe_allow_html=True)
-with account_right:
-    if st.button("ログアウト", key="logout", use_container_width=True):
-        st.session_state.clear()
-        st.rerun()
-
-page = st.radio(
-    "表示する画面",
-    ["新しく作る", "保存したスタイル"],
-    horizontal=True,
-    label_visibility="collapsed",
-    key="main_page",
-)
-if page == "保存したスタイル":
-    render_saved_styles()
-    st.stop()
+    page = st.radio(
+        "表示する画面",
+        ["新しく作る", "保存したスタイル"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="main_page",
+    )
+    if page == "保存したスタイル":
+        render_saved_styles()
+        st.stop()
 
 
 class HairStyle(BaseModel):
@@ -1129,12 +1146,18 @@ def propose_styles(client, image_buffer, choices):
 - ストレート／縮毛矯正が「したくない」なら、その施術前提の髪型を提案しない。
 - スタイリング剤が「ワックスなし」なら、ワックス必須のセットを提案しない。
 - 「ブリーチなしで楽しみたい」が選ばれている場合も、ブリーチ必須のカラーを提案しない。
-- 「パーマ希望」「ブリーチ希望」「ストレート／縮毛矯正を希望する」は提案内容とオーダー文へ明確に反映する。
+- 「パーマ希望」「ブリーチ希望」「ストレート／縮毛矯正を希望する」は提案内容と美容師さんに伝える内容へ明確に反映する。
 - 選択された「細かい希望・叶えたいこと」は、少なくともreasonとorderへ具体的に反映する。
 スタイリング剤が「ワックスなし」の場合は、乾かすだけでもまとまりやすく、ワックスを使わず再現しやすいカットを全案で優先してください。
 スタイリング剤が「ワックスあり」の場合は、ワックス等でセットすることを前提とした髪型も提案できます。
-スタイリング剤の希望はhaircut、reason、orderへ具体的に反映し、orderには自宅でのセット方法も短く含めてください。
-titleは短い名称、haircutは長さ・形・レイヤー等、bangsは前髪、toneは数字を含むトーン、colorは髪色、reasonは似合いそうな理由を90字以内、orderは美容師へそのまま見せられる具体的なオーダー文にしてください。
+スタイリング剤の希望はhaircut、reason、orderへ具体的に反映してください。
+titleは短い名称、haircutは長さ・形・レイヤー等、bangsは前髪、toneは数字を含むトーン、colorは髪色、reasonは似合いそうな理由を90字以内にしてください。
+orderは、ユーザー本人の希望を美容師さんへ伝えるための、丁寧で自然な「相談メモ」にしてください。施術方法を指示する文章にはしないでください。
+orderには、希望する長さや雰囲気、前髪、髪色、日常のセット、選択された施術の希望・避けたい施術を、該当する範囲で4〜6文程度にまとめてください。
+「○cmにしてください」「○mmで刈り上げてください」「この方法でカットしてください」のような、専門家へ手順や数値を断定する表現は禁止です。ユーザー入力にcm・mmの指定欄はないため、長さのcm数や刈り上げのmm数をAIが決めてはいけません。髪色のトーン数はユーザーが選んだ数値なので使用できます。
+haircutやbangsを含む全項目でも、ユーザーが入力していないcm・mmなどの細かな寸法をAIが勝手に決めてはいけません。
+「〜を希望しています」「〜だとうれしいです」「〜は避けたいです」「〜について相談したいです」など、LINE、予約メッセージ、当日のカウンセリングでそのまま使える一人称の柔らかい日本語にしてください。
+最後には必ず、髪質や現在の状態を美容師さんに見てもらい、難しい部分は相談しながら調整してもらいたい旨を入れてください。
 """
     response = client.responses.parse(
         model="gpt-5-mini",
@@ -1159,11 +1182,10 @@ titleは短い名称、haircutは長さ・形・レイヤー等、bangsは前髪
         if choices.get("スタイル区分") == "メンズ":
             style["styling"] = styling
             if styling == "ワックスなし" and "ワックス" not in style["order"]:
-                style["order"] += " スタイリング剤を使わなくても、乾かすだけでまとまりやすいカットを希望します。"
+                style["order"] += " 普段はワックスを使わないため、乾かすだけでもまとまりやすい形を希望しています。"
             elif styling == "ワックスあり" and "ワックス" not in style["order"]:
-                style["order"] += " ワックスを使って動きと束感を出しやすい仕上がりを希望します。"
-        if notes:
-            style["order"] += " 希望条件は、" + "。".join(notes) + "です。"
+                style["order"] += " 普段はワックスを使うため、無理なく動きや束感を出せる雰囲気を希望しています。"
+        style["order"] = consultation_note(style["order"])
         styles.append(style)
     return styles
 
@@ -1336,12 +1358,12 @@ def create_style_sheet(after_bytes, detail_bytes, style):
     condition_items = style.get("preference_notes") or [
         f"明るさは{style['tone']}を目安",
         f"色味は{style['color']}",
-        "現在の髪色や髪質に合わせて美容師と微調整",
+        "現在の髪色や髪質を見て相談しながら調整",
     ]
     sections = [
         ("スタイル概要", overview_items),
         ("見せたい印象", [style["reason"]]),
-        ("施術・髪の条件", condition_items),
+        ("希望・髪の特徴", condition_items),
     ]
     top = 145
     for heading, bullets in sections:
@@ -1352,10 +1374,10 @@ def create_style_sheet(after_bytes, detail_bytes, style):
         draw.line((panel_x + 10, top, panel_x + panel_w, top), fill="#9AA6B4", width=2)
         top += 22
 
-    order_items = [part.strip() for part in style["order"].replace("！", "。").split("。") if part.strip()]
+    order_items = [part.strip() for part in consultation_note(style["order"]).replace("！", "。").split("。") if part.strip()]
     draw.rounded_rectangle((panel_x, 925, 1770, 1305), radius=20, outline=navy, width=2, fill="#FFFDFC")
     draw.rounded_rectangle((panel_x + 65, 945, 1705, 990), radius=6, fill=navy)
-    order_title = "美容師さんにお願いしたいこと"
+    order_title = "美容師さんに伝えたいこと"
     title_width = draw.textlength(order_title, font=small_font)
     draw.text((panel_x + 260 - title_width / 2, 955), order_title, font=small_font, fill="white")
     draw_bullets(draw, order_items, panel_x + 28, 1015, body_font, ink, panel_w - 55, 1280)
@@ -1635,9 +1657,10 @@ if uploaded:
         st.markdown(comparison_html, unsafe_allow_html=True)
         st.download_button("完成画像を保存", st.session_state.after_image, "hair-style-after.jpg", "image/jpeg", use_container_width=True)
 
-        render_step(5, "美容師さん向けオーダー文")
+        render_step(5, "美容師さんに伝えたいこと")
         st.caption("このまま美容師さんに見せたり、LINEや予約フォームへ貼り付けたりできます。")
-        order_text = st.session_state.selected_style["order"]
+        order_text = consultation_note(st.session_state.selected_style["order"])
+        st.session_state.selected_style["order"] = order_text
         st.markdown(
             f'<div class="order-card">{html.escape(order_text)}</div>',
             unsafe_allow_html=True,
@@ -1645,7 +1668,7 @@ if uploaded:
         render_copy_button(order_text)
 
         render_step(6, "お願いシートを作る")
-        st.caption("正面・耳かけ・耳まわり・後ろ姿とオーダー内容を1枚にまとめます。追加の画像生成処理を行います。")
+        st.caption("正面・耳かけ・耳まわり・後ろ姿と、美容師さんに伝えたい希望を1枚にまとめます。追加の画像生成処理を行います。")
         show_usage_cost(SHEET_COST_TEXT)
         if st.button("美容師さんお願いシートを作る", type="primary"):
             with st.spinner("横・耳まわり・後ろ姿を生成し、スタイルシートを作っています…"):
@@ -1687,31 +1710,32 @@ if uploaded:
                     use_container_width=True
                 )
 
-        st.markdown(
-            '<div class="save-note">「アプリに非公開保存」を押したデータだけ保存されます。'
-            '撮影した元写真は保存されません。保存後は画面上部の「保存したスタイル」からすぐ確認できます。</div>',
-            unsafe_allow_html=True,
-        )
-        save_label = (
-            "完成画像・お願いシートを非公開保存"
-            if "style_sheet_png" in st.session_state
-            else "完成画像・オーダー文を非公開保存"
-        )
-        if st.button(save_label, type="primary", key="save_current_style"):
-            with st.spinner("ご本人専用の保存領域へ保存しています…"):
-                try:
-                    _, changed = save_current_style(
-                        st.session_state.after_image,
-                        st.session_state.selected_style,
-                        st.session_state.get("style_sheet_png"),
-                        st.session_state.get("style_sheet_pdf"),
-                    )
-                    if changed:
-                        st.success("非公開で保存しました。「保存したスタイル」から確認できます。")
-                    else:
-                        st.info("この内容はすでに保存されています。")
-                except RuntimeError as exc:
-                    st.error(f"保存できませんでした：{exc}")
+        if storage_enabled:
+            st.markdown(
+                '<div class="save-note">「アプリに非公開保存」を押したデータだけ保存されます。'
+                '撮影した元写真は保存されません。保存後は画面上部の「保存したスタイル」からすぐ確認できます。</div>',
+                unsafe_allow_html=True,
+            )
+            save_label = (
+                "完成画像・お願いシートを非公開保存"
+                if "style_sheet_png" in st.session_state
+                else "完成画像・伝えたい内容を非公開保存"
+            )
+            if st.button(save_label, type="primary", key="save_current_style"):
+                with st.spinner("ご本人専用の保存領域へ保存しています…"):
+                    try:
+                        _, changed = save_current_style(
+                            st.session_state.after_image,
+                            st.session_state.selected_style,
+                            st.session_state.get("style_sheet_png"),
+                            st.session_state.get("style_sheet_pdf"),
+                        )
+                        if changed:
+                            st.success("非公開で保存しました。「保存したスタイル」から確認できます。")
+                        else:
+                            st.info("この内容はすでに保存されています。")
+                    except RuntimeError as exc:
+                        st.error(f"保存できませんでした：{exc}")
 
         render_step(7, "もう一度作る")
         retry_left, retry_right = st.columns(2)
